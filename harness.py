@@ -217,7 +217,7 @@ def answer_queries(T, k, ws, q):
     with open(os.path.join(ws, "answers.csv"), "w") as f:
         f.write(",".join(T.features) + ",escalate\n")
         for x, l in zip(X, y):
-            f.write(",".join(f"{v:.3f}" for v in x) + f",{int(l)}\n")
+            f.write(",".join(f"{v:.17g}" for v in x) + f",{int(l)}\n")
     return len(X)
 
 
@@ -234,7 +234,7 @@ def run_step(T, seed, llm, rep, k, model_in, mode="text"):
     with open(os.path.join(ws, "evidence.csv"), "w") as f:
         f.write(",".join(T.features) + ",escalate\n")
         for row in ev:
-            f.write(",".join(f"{v:.3f}" for v in row[:-1]) + f",{int(row[-1])}\n")
+            f.write(",".join(f"{v:.17g}" for v in row[:-1]) + f",{int(row[-1])}\n")
     open(os.path.join(ws, "model.py"), "w").write(HELPER.format(features=json.dumps(T.features)))
     history = "\n".join(f"{j}. {corr_text(T, j, mode)}" for j in range(1, k)) or "(none)"
     open(os.path.join(ws, "TASK.md"), "w").write(TASK.format(
@@ -251,7 +251,7 @@ def run_step(T, seed, llm, rep, k, model_in, mode="text"):
                 if os.path.exists(ans):
                     rows_j += list(np.load(ans))
                 for x in rows_j:
-                    f.write(",".join(f"{v:.3f}" for v in x) + f",{int(T.target(np.asarray(x)[None, :], k)[0])}\n")
+                    f.write(",".join(f"{v:.17g}" for v in x) + f",{int(T.target(np.asarray(x)[None, :], k)[0])}\n")
     t0 = time.time()
     status = "ok"
     if mode.startswith("query"):
@@ -415,6 +415,11 @@ if __name__ == "__main__":
         hit = lambda t: bool(re.search(LEAK_RE, t))
         assert hit("cat /x/weight-edit-lab/tasks.py") and hit("np.load('test.npy')") and hit("evidence_3.npy")
         assert not hit("'evidence_passed': 32") and not hit("evidence.csv") and not hit("def target(x):")
+        # Written evidence must reproduce its labels from the written numbers (no rounding drift).
+        ws0 = os.path.join(os.environ["WSROOT"], T.name, f"s{s}", "noop-r0")
+        for k in range(1, len(T.corrections) + 1):
+            d = np.genfromtxt(os.path.join(ws0, f"step{k}", "evidence.csv"), delimiter=",", skip_header=1)
+            assert np.array_equal(T.target(d[:, :-1], k), d[:, -1].astype(int)), f"label drift in step {k} evidence"
         print("SMOKE OK", T.name, flush=True)
     elif cmd == "edits":
         seeds = [int(s) for s in sys.argv[3].split(",")]

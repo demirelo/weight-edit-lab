@@ -30,9 +30,9 @@ def chains(task):
     for f in sorted(glob.glob(f"{ROOT}/runs/{task}/seed*/*-r*/results.json")):
         rows = json.load(open(f))
         d = os.path.dirname(f)
-        tok = sum(tokens(p) for p in glob.glob(f"{d}/step*/codex.log"))
-        leaks = sorted({m.group(0) for p in glob.glob(f"{d}/step*/codex.log")
-                        for m in re.finditer(LEAK_RE, open(p, errors="replace").read())})
+        tok = sum(tokens(p) for p in glob.glob(f"{d}/step*/codex*.log"))
+        leaks = sorted({m.group(0) for p in glob.glob(f"{d}/step*/codex*.log")
+                        for m in re.finditer(LEAK_RE, open(p, errors="replace").read())})  # all phases
         mode = rows[0].get("mode", "text")
         out.append({"llm": rows[0]["llm"] + ("" if mode == "text" else f"-{mode}"), "seed": rows[0]["seed"], "rep": rows[0]["rep"],
                     "final": rows[-1], "steps_ok": [step_ok(r) for r in rows],

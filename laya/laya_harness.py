@@ -204,7 +204,8 @@ def call_editor(llm, ws, prompt, logname):
                    "--skip-git-repo-check", "-C", ws, prompt]
         else:
             # Opus: file tools plus this venv's python and read-only shell tools; nothing else.
-            cmd = ["claude", "-p", prompt, "--model", model] + (["--effort", effort] if effort and llm != "opus" else []) + ["--permission-mode", "acceptEdits",
+            # stream-json + verbose keeps the full tool transcript, so reads can be audited.
+            cmd = ["claude", "-p", prompt, "--model", model, "--output-format", "stream-json", "--verbose"] + (["--effort", effort] if effort and llm != "opus" else []) + ["--permission-mode", "acceptEdits",
                    "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", f"Bash({PY}:*)",
                    "Bash(ls:*)", "Bash(head:*)", "Bash(cat:*)", "Bash(wc:*)"]
         try:
