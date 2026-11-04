@@ -127,37 +127,49 @@ names the true kind for steps 2 and 4. Modes `query0w` (no labels) and `query8w`
   3 chains per cell, the gap between "wide, no labels" and "wide + labels" is
   within that variation.
 
-## Real decision model: Laya (2026-11-04, interim)
+## Real decision model: Laya (2026-11-04)
 Laya (convaiinnovations/laya, Apache 2.0) routes Banking77 customer messages to 5
 departments. Its zero-shot accuracy is 70.3%. The encoder and head layers stay frozen;
 editors may change only the scorer MLP (about 1.05M params) or add a ReLU module, using
 one sentence + 32 messages per correction and a tool that embeds messages they write.
-The 3 corrections target Laya's real error clusters (exchange-rate complaints, PIN
-issues, eligibility questions; 80 test messages each). Code: `laya/`. Prior work and
-framing: [PRIOR_WORK.md](PRIOR_WORK.md).
+The 3 corrections target 3 of Laya's largest error clusters (exchange-rate complaints,
+PIN issues, eligibility questions; 80 test messages each). Code: `laya/`. Prior work
+and framing: [PRIOR_WORK.md](PRIOR_WORK.md).
 
 | Method (2 seeds each, `laya/laya_analyze.py`) | Effort | Final acc. | All corrections fixed | Drift elsewhere | Min/chain |
 |---|---|---|---|---|---|
 | Unedited Laya | - | 70.3% | 12.5% | - | - |
+| Opus 5.5 code patch (Python override) | high | **78.1%** | 90.8% | 3.1% | 7 |
+| Fable 5.1 code patch | high | 77.7% | 91.3% | 2.8% | 11 |
+| Opus 5.5 code patch | medium | 77.1% | 84.8% | 1.8% | 5 |
 | Opus 5.5 writes weights | medium | 76.9% | 86.7% | 7.1% | 45 |
-| Opus 5.5 code patch (Python override) | medium | 77.1% | 84.8% | 1.8% | 5 |
-| Sol writes weights | high | 67.5% | 84.8% | 26% | 84 |
-| Astra writes weights | high | 67.9% | 78.8% | 23% | 71 |
 | Astra code patch | high | 76.2% | 77.1% | 1.4% | 5 |
+| Fine-tune scorer, 32 labels/fix (best of 64 grid points) | - | 75.0% | - | 19.0% | - |
+| Fable 5.1 writes weights | high | 74.8% | 71.9% | 7.4% | 81 |
+| Opus 5.5 writes weights | high | 72.9% | 46.0% | 2.3% | 76 |
+| Astra writes weights | high | 67.9% | 78.8% | 23% | 71 |
+| Sol writes weights | high | 67.5% | 84.8% | 26% | 84 |
 
-- Reasoning effort was not matched: Astra and Sol ran at `high`; Opus ran with no
-  `--effort` flag, so it used the Claude Code default, `medium`. A rerun of Opus at
-  `high` is in progress.
+- **Verdict: on Laya, a code patch beats every weight edit and fine-tuning.** The best
+  weight edit (Opus at medium) comes within 1.2 points of the best code patch, at about
+  6x the time. Fine-tuning plateaus at 75-76% even with 256 labels per correction.
+- Higher effort helped code patches (Opus 77.1% -> 78.1%) but not weight edits. Opus at
+  high refused to edit on seed 0: it concluded the scorer cannot tell which department
+  it is scoring and shipped the weights unchanged. Opus at medium, same seed, fixed 96%
+  of that correction by adding a module on the raw marker vector.
+- Weight edits that work find concept directions from hundreds of messages the editor
+  writes itself and add narrow single-unit switches. Astra and Sol fix the targets but
+  move about a quarter of all other messages.
+- Unlike the synthetic tasks, edits here are approximate: drift is the main cost.
 - Columns: "All corrections fixed" = share of the 240 test messages covered by any of
   the 3 corrections that are routed correctly after the last step. "Drift elsewhere" =
   share of test messages outside all corrected intents whose department changed vs
-  unedited Laya.
-- Opus finds concept directions from hundreds of messages it writes itself and adds
-  narrow single-unit switches; it ties the code patch. Astra and Sol fix the targets
-  but move a quarter of all other messages.
-- Gradient fine-tuning of the scorer on the same messages: rerun with a wider grid in
-  progress (the first grid's best point sat at its edge).
-- Unlike the synthetic tasks, edits here are approximate: drift is the main cost.
+  unedited Laya. Fine-tune drift and accuracy: `laya/laya_baselines.py`.
+- Isolation: during these runs the Laya test cache, Banking77 labels and the intent
+  truth sat inside the lab, reachable by an editor that went looking (as did the
+  synthetic task's `tasks.py`). Log scans found no reads; one editor reported seeing the
+  cache and not opening it. All of it now lives outside the lab, and the smoke test
+  fails if it returns. Isolation is by path and log scan, not an OS sandbox.
 
 ## What is not in this repo
 Python environment, the Laya checkpoint (download from Hugging Face), Banking77

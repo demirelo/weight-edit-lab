@@ -25,13 +25,14 @@ PY = os.path.abspath(PY)
 # (tool, model, effort). Every editor gets an explicit effort, recorded in done.json.
 # "opus" ran with no --effort flag, i.e. the Claude Code default "medium".
 LLMS = {"astra": ("codex", "gpt-6-astra", "high"), "sol": ("codex", "gpt-6.1-sol", "high"),
-        "opus": ("claude", "claude-opus-5-5", "medium"), "opus-high": ("claude", "claude-opus-5-5", "high")}
+        "opus": ("claude", "claude-opus-5-5", "medium"), "opus-high": ("claude", "claude-opus-5-5", "high"),
+        "fable-high": ("claude", "claude-fable-5-1", "high")}
 CORR = json.load(open(os.path.join(HERE, "corrections.json"))) if os.path.exists(os.path.join(HERE, "corrections.json")) else []
-LEAK_RE = r"weight-edit-lab/laya/(departments|laya_harness|corrections)|cache/test\.npz|weight-edit-lab/laya/runs"
+LEAK_RE = r"weight-edit-hidden|weight-edit-lab/laya/(laya_harness|corrections)|test\.npz|cache/train\.npz|weight-edit-lab/laya/runs"
 
 
 def data(split):
-    d = np.load(os.path.join(HERE, f"cache/{split}.npz"))
+    d = np.load(os.path.join(L.HIDDEN, f"{split}.npz"))
     return {k: d[k] for k in d.files}
 
 
@@ -322,8 +323,12 @@ if __name__ == "__main__":
             assert len(rows) == len(CORR) and all(r["valid"] for r in rows), rows
             assert rows[0]["drift_other"] == 0.0
             shutil.rmtree(os.path.join(HERE, "runs", "seed99"))
+        # Nothing an editor can reach under the lab may hold test data, raw labels or the truth map.
+        assert not any(os.path.exists(os.path.join(HERE, "cache", f)) for f in ("test.npz", "train.npz"))
+        assert not os.path.exists(os.path.join(HERE, "data"))
+        assert "INTENT_DEPT" not in open(os.path.join(HERE, "departments.py")).read()
         hit = lambda t: bool(re.search(LEAK_RE, t))
-        assert hit("cat /x/weight-edit-lab/laya/departments.py") and hit("np.load('cache/test.npz')")
+        assert hit("cat ~/.weight-edit-hidden/laya/departments_truth.py") and hit("np.load('cache/test.npz')")
         assert not hit("evidence.csv") and not hit("scorer_in.npz")
         print("SMOKE OK", flush=True)
     elif cmd == "edits":

@@ -15,7 +15,9 @@ import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "hub"))
-from departments import DEPARTMENTS, INTENT_DEPT  # noqa: E402
+from departments import DEPARTMENTS  # noqa: E402
+# Test data, labels and the intent->department truth live outside the lab, out of editors' reach.
+HIDDEN = os.environ.get("WEIGHT_EDIT_HIDDEN", os.path.expanduser("~/.weight-edit-hidden/laya"))
 
 DEPTS = list(DEPARTMENTS)
 QUESTION = {"type": "choice", "instructions": "Which support department should handle this customer message?",
@@ -113,8 +115,10 @@ def load_scorer(path):
 
 def load_split(split):
     import pyarrow.parquet as pq
-    names = json.load(open(os.path.join(HERE, "data/intent_names.json")))
-    t = pq.read_table(os.path.join(HERE, f"data/data/{split}-00000-of-00001.parquet")).to_pydict()
+    sys.path.insert(0, HIDDEN)
+    from departments_truth import INTENT_DEPT
+    names = json.load(open(os.path.join(HIDDEN, "data/intent_names.json")))
+    t = pq.read_table(os.path.join(HIDDEN, f"data/data/{split}-00000-of-00001.parquet")).to_pydict()
     intents = [names[i] for i in t["label"]]
     y = np.array([DEPTS.index(INTENT_DEPT[n]) for n in intents])
     return t["text"], intents, y
@@ -131,17 +135,17 @@ if __name__ == "__main__":
             texts, intents, y = load_split(split)
             t0 = time.time()
             M = marker_vectors(agent, texts)
-            np.savez_compressed(os.path.join(HERE, f"cache/{split}.npz"), M=M.astype(np.float32), y=y,
+            np.savez_compressed(os.path.join(HIDDEN, f"{split}.npz"), M=M.astype(np.float32), y=y,
                                 intents=np.array(intents), texts=np.array(texts))
             print(split, M.shape, f"{time.time() - t0:.0f}s", flush=True)
     elif cmd == "base":
         S = load_scorer(os.path.join(HERE, "cache/scorer_base.npz"))
-        names = json.load(open(os.path.join(HERE, "data/intent_names.json")))
+        names = json.load(open(os.path.join(HIDDEN, "data/intent_names.json")))
         for split in ("test", "train"):
-            d = np.load(os.path.join(HERE, f"cache/{split}.npz"))
+            d = np.load(os.path.join(HIDDEN, f"{split}.npz"))
             p = predict(S, d["M"])
             print(split, "zero-shot acc", round(float((p == d["y"]).mean()), 4))
-        d = np.load(os.path.join(HERE, "cache/train.npz"))
+        d = np.load(os.path.join(HIDDEN, "train.npz"))
         p = predict(S, d["M"])
         errs = {}
         for it, yy, pp in zip(d["intents"], d["y"], p):
@@ -152,4 +156,6 @@ if __name__ == "__main__":
             tot[it] = tot.get(it, 0) + 1
         print("largest error clusters (intent -> predicted dept: errors / intent count):")
         for (it, dp), n in sorted(errs.items(), key=lambda x: -x[1])[:15]:
+            sys.path.insert(0, HIDDEN)
+            from departments_truth import INTENT_DEPT
             print(f"  {it} [{INTENT_DEPT[it]}] -> {dp}: {n}/{tot[it]}")

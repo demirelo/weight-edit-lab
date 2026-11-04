@@ -36,4 +36,4 @@ Asking for labels that split their candidate rules: +2 points. The right rule wa
 Making them propose more kinds of rule: 2 of 6 runs found it (99%), others locked onto false patterns. Best mix: 96%.
 
 **7/**
-Code, logs and the models' notes on every edit: {LINK}
+Code, logs and the models' notes on every edit: https://github.com/demirelo/weight-edit-lab
