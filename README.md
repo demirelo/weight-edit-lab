@@ -4,7 +4,7 @@
 by hand (no gradients), one correction after another, without breaking earlier
 fixes? And does that hold as the net grows?
 
-**Answer (2026-11-03/04 runs).** Yes, when each correction is given as one sentence.
+**Answer.** Yes, when each correction is given as one sentence.
 In all 30 text-guided chains on the 5.6k- and 76.5k-param nets, the edited net
 agrees with the ideal edit of its base net on **50,000 / 50,000** held-out inputs
 (`fidelity.py`). Without the sentence (examples only), both models infer plausible
