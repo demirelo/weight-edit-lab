@@ -23,9 +23,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY = os.path.join(HERE, "..", ".venv", "bin", "python")
 PY = os.path.abspath(PY)
 # (tool, model, effort). Every editor gets an explicit effort, recorded in done.json.
-# "opus" ran with no --effort flag (CLI default; reported as medium), kept for the record.
+# "opus" ran with no --effort flag, i.e. the Claude Code default "medium".
 LLMS = {"astra": ("codex", "gpt-6-astra", "high"), "sol": ("codex", "gpt-6.1-sol", "high"),
-        "opus": ("claude", "claude-opus-5-5", None), "opus-high": ("claude", "claude-opus-5-5", "high")}
+        "opus": ("claude", "claude-opus-5-5", "medium"), "opus-high": ("claude", "claude-opus-5-5", "high")}
 CORR = json.load(open(os.path.join(HERE, "corrections.json"))) if os.path.exists(os.path.join(HERE, "corrections.json")) else []
 LEAK_RE = r"weight-edit-lab/laya/(departments|laya_harness|corrections)|cache/test\.npz|weight-edit-lab/laya/runs"
 
@@ -203,7 +203,7 @@ def call_editor(llm, ws, prompt, logname):
                    "--skip-git-repo-check", "-C", ws, prompt]
         else:
             # Opus: file tools plus this venv's python and read-only shell tools; nothing else.
-            cmd = ["claude", "-p", prompt, "--model", model] + (["--effort", effort] if effort else []) + ["--permission-mode", "acceptEdits",
+            cmd = ["claude", "-p", prompt, "--model", model] + (["--effort", effort] if effort and llm != "opus" else []) + ["--permission-mode", "acceptEdits",
                    "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", f"Bash({PY}:*)",
                    "Bash(ls:*)", "Bash(head:*)", "Bash(cat:*)", "Bash(wc:*)"]
         try:

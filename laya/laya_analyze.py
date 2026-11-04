@@ -33,7 +33,7 @@ for f in sorted(glob.glob(f"{HERE}/runs/seed*/*-r*/results.json")):
     last = rows[-1]
     arm = f"{last['llm']}-{last['mode']}"
     last = dict(last, fix_all=fix_all(np.load(os.path.join(os.path.dirname(f), f"step{last['step']}", "test_pred.npy"))))
-    out["per_chain"].append({"arm": arm, "seed": last["seed"], "effort": rows[0].get("effort", "high" if last["llm"] in ("astra", "sol") else "cli-default"),
+    out["per_chain"].append({"arm": arm, "seed": last["seed"], "effort": rows[0].get("effort", "high" if last["llm"] in ("astra", "sol") else "medium"),
                              **{k: last.get(k) for k in KEYS},
                              "minutes": round(sum(r["seconds"] for r in rows) / 60, 1),
                              "leaks": sorted({w for r in rows for w in r["leaks"]})})
