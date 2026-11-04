@@ -4,13 +4,17 @@
 by hand (no gradients), one correction after another, without breaking earlier
 fixes? And does that hold as the net grows?
 
-**Answer.** Yes, when each correction is given as one sentence.
+**Answer.** On toy nets, yes, when each correction is given as one sentence.
 In all 30 text-guided chains on the 5.6k- and 76.5k-param nets, the edited net
 agrees with the ideal edit of its base net on **50,000 / 50,000** held-out inputs
 (`fidelity.py`). Without the sentence (examples only), both models infer plausible
-wrong rules and land at 88-94%.
+wrong rules and land at 88-94%. On a real decision model (Laya, 421M), a plain code
+patch beats every weight edit and fine-tuning: 21.9% test error against 25.2% for the
+best weight edit at the same effort and 25.0% for fine-tuning, from 29.7% unedited.
 
 ![error rates](results/error_rates.png)
+
+![Laya error](results/laya_error.png)
 
 ## Setup
 - Task: escalate an ops alert or not. A ReLU MLP is trained on a rule with planted
@@ -73,7 +77,7 @@ are not: from 32 examples both models choose the same simplest-looking wrong
 rule (an EU output offset; a box in urgency × confidence). Wrong guesses are never
 corrected later. Final accuracy 88.1-94.3% (mean 92.1%), fidelity 88-94% (mean 92.2%).
 
-## Examples plus asked labels (2026-11-04)
+## Examples plus asked labels
 Same as examples-only, but each step has two phases. Phase 1: the model writes 2-4
 candidate rules that fit all examples, then picks up to Q inputs whose labels
 would tell them apart. The harness labels them from ground truth. Phase 2: the
@@ -96,7 +100,7 @@ model edits. Large task, 3 seeds × Astra and Sol (`mode=query1`, `query8`).
 - 3 chains per cell: the 8-label gain has the same sign for both models but is
   small next to the gap to the sentence (5-6 points).
 
-### Wider candidate lists (2026-11-04)
+### Wider candidate lists
 Phase 1 now requires candidates from at least 3 of 4 named kinds of rule (output
 shift, region override, input re-interpretation, interaction). Caveat: the list
 names the true kind for steps 2 and 4. Modes `query0w` (no labels) and `query8w`.
@@ -127,7 +131,7 @@ names the true kind for steps 2 and 4. Modes `query0w` (no labels) and `query8w`
   3 chains per cell, the gap between "wide, no labels" and "wide + labels" is
   within that variation.
 
-## Real decision model: Laya (2026-11-04)
+## Real decision model: Laya
 Laya (convaiinnovations/laya, Apache 2.0) routes Banking77 customer messages to 5
 departments. Its zero-shot accuracy is 70.3%. The encoder and head layers stay frozen;
 editors may change only the scorer MLP (about 1.05M params) or add a ReLU module, using
