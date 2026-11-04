@@ -145,6 +145,12 @@ framing: [PRIOR_WORK.md](PRIOR_WORK.md).
 | Astra writes weights | 67.9% | 76% | 23% | 71 |
 | Sol writes weights | 67.5% | 89% | 26% | 84 |
 
+- Reasoning effort was not matched: Astra and Sol ran at `high`; Opus ran with no
+  `--effort` flag (the Claude Code default, reported as medium). A rerun of Opus at
+  `high` is in progress.
+- Columns: "Target fixed" = share of the 80 test messages of the latest correction's
+  intents routed correctly after the last step. "Drift elsewhere" = share of test
+  messages outside all corrected intents whose department changed vs unedited Laya.
 - Opus finds concept directions from hundreds of messages it writes itself and adds
   narrow single-unit switches; it ties the code patch. Astra and Sol fix the targets
   but move a quarter of all other messages.
