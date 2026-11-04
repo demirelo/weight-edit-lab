@@ -1,0 +1,5 @@
+Inferred rule: ignore tone_anger for every input. Escalate if and only if the original model's logit, evaluated with tone_anger set to zero, is greater than zero. The eight returned labels match candidate B. They reject candidate A on row 1 and candidate C on rows 2, 5, 7, and 8.
+
+I set all 64 weights from tone_anger to the first hidden layer to zero. I preserved all other weights, biases, layers, and metadata. For any input, the edited first-layer preactivation equals the original preactivation with tone_anger set to zero. Thus, all later activations and the output also agree. This implements the inferred rule throughout the domain and preserves the original output wherever tone_anger is zero.
+
+Checks passed: all 32 evidence labels and all eight answer labels match. Forward passes on 50,000 random valid inputs and all 1,048,576 binary input corners gave exact logit equality with the original model evaluated at tone_anger = 0. These are local checks, not the hidden test set. No training, fitting, or optimization was used.

@@ -1,0 +1,5 @@
+Inferred rule: Remove anger influence. Escalate if and only if the original model's logit is greater than zero after setting tone_anger to zero. All eight query answers support candidate A; candidates B and C each match only four answers.
+
+I set all 64 weights in the tone_anger row of the first layer to zero. All other weights, biases, layers, and metadata remain unchanged. Each first-layer preactivation therefore equals the original preactivation with tone_anger set to zero. Every later activation and the output logit follow exactly. This implements the rule for all valid inputs and preserves the original model when tone_anger is zero.
+
+Validation: All 32 evidence labels and all eight answer labels pass. On 50,000 constructed random inputs with valid binary features, the edited logits exactly equal the original logits with anger set to zero. Setting anger to one also leaves these edited logits unchanged. These checks do not use the hidden test set. No training, fitting, or optimization was used.

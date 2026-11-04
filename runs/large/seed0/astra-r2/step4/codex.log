@@ -1,0 +1,438 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s0/astra-r2/step4
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a3b9-399c-72a0-8278-0854af44625d
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and the project instructions, then complete the required work and checks.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "pwd; rg --files -g 'TASK.md' -g 'AGENTS.md' -g '"'!node_modules'"' -g '"'!vendor'"'" in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 0ms:
+$WSROOT/large/s0/astra-r2/step4
+TASK.md
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "rg -n 'step4|astra-r2' ~/.codex/memories/MEMORY.md" in $WSROOT/large/s0/astra-r2/step4
+ exited 1 in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md' in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 0ms:
+# Weight-editing task (step 4 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. tone_anger must have no effect on escalation. Decide every alert as if its tone_anger were 0.
+2. For EU alerts (region_eu = 1), treat impact as 0.15 higher than its reported value (the adjusted value may exceed 1). Non-EU alerts are unchanged.
+3. Any alert with tier_critical = 1 and error_rate above 0.7 must ALWAYS be escalated, whatever else holds.
+
+## New correction for this step
+When confidence is below 0.4, treat urgency as twice its reported value (the adjusted value may exceed 1). When confidence is 0.4 or more, urgency is unchanged.
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la; cat model.py; head -c 3000 model_in.json; head -5 evidence.csv' in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 0ms:
+total 304
+drwxr-xr-x@ 8 user  wheel     256 Nov  4 00:23 .
+drwxr-xr-x@ 6 user  wheel     192 Nov  4 00:23 ..
+-rw-r--r--@ 1 user  wheel    2376 Nov  4 00:23 TASK.md
+-rw-r--r--@ 1 user  wheel    4232 Nov  4 00:23 codex.log
+-rw-r--r--@ 1 user  wheel    4560 Nov  4 00:23 default.profraw
+-rw-r--r--@ 1 user  wheel    4124 Nov  4 00:23 evidence.csv
+-rw-r--r--@ 1 user  wheel     806 Nov  4 00:23 model.py
+-rw-r--r--@ 1 user  wheel  119180 Nov  4 00:23 model_in.json
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+{"features": ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"], "activation": "relu hidden layers, linear output logit; escalate iff logit > 0", "layers": [{"W": [[0.06762176548323753, -0.3687824523760172, -0.8789155850524004, -0.17826657319094327, -0.284348385574181, 0.023039141279770997, -0.34702020386597915, -0.09839510423016676, -0.20158894096922067, -0.2527463947687801, -0.31269314303185164, 0.3521751847005458, -0.355398260082348, 0.5321874479249995, -0.18433777177889907, -0.49170751275557406, 0.6832328343450328, -0.04224005925636059, 0.5178658329795325, -0.45411983631646136, -0.7757084112920313, -0.4418646960744428, -0.17335362881838506, -0.3799970928472484, 0.6648083302831577, -0.21024814046210283, -0.408464418365959, 1.1055806085024276, -0.3381171528645659, 0.36461138717716024, -0.07233551761548339, 0.0800479486873061, -0.24153763756981428, -0.5928598353862281, -0.22817313356877625, 0.2908692749453293, 0.3543199891865004, -0.471282637972944, -0.3780316470921043, 0.6874796842748575, 0.06821116402534658, -0.8382495674589129, -0.2762360080855462, -0.29306701961499304, 0.6178081537721544, 0.2565254300235996, 0.46082596591096575, 0.8228415155829646, -0.017575757148828922, -0.0009176510121020182, 0.15455636505944698, -0.3104834997836373, -0.3337116162015152, 0.9213422675666046, -0.15159097058743382, -0.26984391427387444, -0.415152220861964, -0.3966751531758604, 0.0582586488465639, -0.33716790190954604, -0.26079426959776886, -0.03609476356568119, 0.4705129594429213, 0.36186454186224476, 0.0, 0.0], [-0.025212213627968057, -0.4610717829796929, -0.800138221964377, -0.5163645127185602, -0.2606509553884579, 0.09621608376329996, -0.25330741609411334, -0.16656322611235333, -0.1891341820020833, -0.5992346826739561, -0.17699902546911792, 0.6099018157354524, -0.042684642777094245, 0.2247434238338423, -0.270604459744261, -0.4350471739792104, 0.6290322629979367, -0.2833596108665806, 0.6020671678169701, -0.3863982466650841, -0.5215219327778903, -0.12895746562286334, 0.0588239964212139, -0.4646206298456815, -0.0033730217030218026, -0.24008739471174273, -0.026085838732782318, -0.20674837045994385, -0.6938723025397424, 0.22818491475612138, -0.6511811598547143, -0.4915434252649687, -0.05004373700082381, -0.12384370474543885, 0.003481925888731165, 0.464578984316953, 0.24460040580860218, -0.20072831597574367, -0.30272414129218495, 0.14465091299496896, -0.07893216625084358, -0.07293918627359007, -0.1613688801358096, -0.2070081165209502, 0.5733989946365518, -0.34559996776457796, 0.024596319972559785, 0.7261835951777975, -0.09857433822780465, -0.042626414422665626, -0.09700578832508477, -0.08493120348270843, -0.09936521899593904, 0.5051419179722492, 0.19865094867916935, -0.22638242361108027, -0.365420085814731, -0.3479958281445343, -0.34939406955683impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.285,0.823,0.121,0.910,0.089,0.749,0.315,0.000,1.000,0.000,0.095,0.921,0.463,0.767,0.946,0.661,0.494,0.443,0.533,0.036,1
+0.069,0.918,0.172,0.887,0.048,0.658,0.971,0.000,0.000,0.000,0.222,0.506,0.848,0.960,0.586,0.586,0.089,0.486,0.116,0.476,1
+0.183,0.709,0.200,0.131,0.253,0.128,0.595,1.000,1.000,0.000,0.021,0.366,0.086,0.481,0.214,0.181,0.305,0.609,0.320,0.123,1
+0.181,0.676,0.815,0.471,0.320,0.455,0.816,0.000,1.000,0.000,0.964,0.529,0.200,0.705,0.468,0.801,0.173,0.072,0.383,0.241,1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import model,numpy as np,json
+m=model.load('model_in.json')
+for i,(w,b) in enumerate(m):
+ print('layer',i,'shape',w.shape,'bias range',b.min(),b.max())
+ print('last weights', w[-4:,-6:]); print('last biases',b[-6:])
+print('tone max',abs(m[0][0][3]).max())
+print('EU residual',abs(m[0][0][8]-.15*m[0][0][0]).max())
+PY" in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 5ms:
+layer 0 shape (20, 66) bias range -0.7 1.0
+last weights [[-0.07172957  0.38844136 -0.29204205  0.23247802  0.          0.        ]
+ [-0.03342227 -0.04443501 -0.26770079 -0.22640368  0.          0.        ]
+ [ 0.21703044 -0.06726151  0.45270531  0.44446549  0.          0.        ]
+ [-0.22762224 -0.08633177  0.14897867  0.18869845  0.          0.        ]]
+last biases [ 0.26887688 -0.50001575 -0.38065053 -0.45684752 -0.7         1.        ]
+layer 1 shape (66, 65) bias range -0.5798092484707381 0.853698834321433
+last weights [[-0.08549079  0.17160948 -0.33760794 -0.3428976   0.41440128  0.        ]
+ [ 0.75001766 -0.19120931 -0.3932731  -0.31446685  0.00562203  0.        ]
+ [ 0.          0.          0.          0.          0.          1.        ]
+ [ 0.          0.          0.          0.          0.         -1.        ]]
+last biases [-0.44147369 -0.06746767  0.47688815  0.53579244 -0.34389437  0.        ]
+layer 2 shape (65, 2) bias range -0.3535508605210373 0.0
+last weights [[-0.78153957  0.        ]
+ [-0.92609026  0.        ]
+ [ 0.78445401  0.        ]
+ [ 0.          1.        ]]
+last biases [-0.35355086  0.        ]
+layer 3 shape (2, 1) bias range 0.0 0.0
+last weights [[1.]
+ [1.]]
+last biases [0.]
+tone max 0.0
+EU residual 0.9263241000211044
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import model,numpy as np
+m=model.load('model_in.json')
+np.set_printoptions(precision=5,suppress=True,linewidth=160)
+w0,b0=m[0];w1,b1=m[1];w2,b2=m[2]
+print('w0 last two',w0[:,-2:]);print('w2',w2.T)
+for j in range(4):print('w0 feature',j,w0[j,:64])
+print('w1',w1[:8,:8])
+r=np.random.default_rng(2);x=r.random((20000,20));x[:,[7,8,9]]=r.integers(0,2,(len(x),3));y=x.copy();y[:,1]*=2
+f=model.logit(m,x);g=model.logit(m,y)
+print('orig range',f.min(),f.max(),'double range',g.min(),g.max(),'decreases',sum(g<f-1e-10),'positive flips down',sum((f>0)&(g<=0)))
+PY" in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 204ms:
+w0 last two [[ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 1.  0.]
+ [ 0.  0.]
+ [ 0. -1.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]
+ [ 0.  0.]]
+w2 [[ 0.76829 -0.58048  0.53805 -0.64264 -0.9325   1.09545  1.61607  0.99583 -0.43971  0.72613 -0.66304  0.43434 -0.58816  0.11922 -0.45995  0.36395  0.39169
+   0.63807 -0.92607 -0.45264 -1.10145 -0.33906  0.45072  1.45805  0.07483  0.79921 -1.76939 -1.38047  1.09081  2.03471 -1.50938 -0.43028 -0.46891 -0.59368
+   0.65035  0.081   -0.30652  0.56501 -0.61229  2.22056 -1.16287 -0.88938  0.42066 -1.45507 -0.61466  0.6875   1.68554  0.03141 -0.60851 -0.90726 -0.54376
+   0.49321 -0.87083  1.63956 -0.66201 -1.13997 -0.89191  0.41146 -0.73742  0.58489  0.08488 -0.78154 -0.92609  0.78445  0.     ]
+ [ 0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.
+   0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.
+   0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.
+   0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       0.       1.     ]]
+w0 feature 0 [ 0.06762 -0.36878 -0.87892 -0.17827 -0.28435  0.02304 -0.34702 -0.0984  -0.20159 -0.25275 -0.31269  0.35218 -0.3554   0.53219 -0.18434 -0.49171  0.68323
+ -0.04224  0.51787 -0.45412 -0.77571 -0.44186 -0.17335 -0.38     0.66481 -0.21025 -0.40846  1.10558 -0.33812  0.36461 -0.07234  0.08005 -0.24154 -0.59286
+ -0.22817  0.29087  0.35432 -0.47128 -0.37803  0.68748  0.06821 -0.83825 -0.27624 -0.29307  0.61781  0.25653  0.46083  0.82284 -0.01758 -0.00092  0.15456
+ -0.31048 -0.33371  0.92134 -0.15159 -0.26984 -0.41515 -0.39668  0.05826 -0.33717 -0.26079 -0.03609  0.47051  0.36186]
+w0 feature 1 [-0.02521 -0.46107 -0.80014 -0.51636 -0.26065  0.09622 -0.25331 -0.16656 -0.18913 -0.59923 -0.177    0.6099  -0.04268  0.22474 -0.2706  -0.43505  0.62903
+ -0.28336  0.60207 -0.3864  -0.52152 -0.12896  0.05882 -0.46462 -0.00337 -0.24009 -0.02609 -0.20675 -0.69387  0.22818 -0.65118 -0.49154 -0.05004 -0.12384
+  0.00348  0.46458  0.2446  -0.20073 -0.30272  0.14465 -0.07893 -0.07294 -0.16137 -0.20701  0.5734  -0.3456   0.0246   0.72618 -0.09857 -0.04263 -0.09701
+ -0.08493 -0.09937  0.50514  0.19865 -0.22638 -0.36542 -0.348   -0.34939 -0.27906 -0.25578  0.42992  0.36617  0.69177]
+w0 feature 2 [ 0.1964  -0.46115  0.8367   0.02547 -0.06574 -0.11997  1.13581  0.32623 -0.34388  0.15599 -0.69294 -1.0983  -0.07209  0.53061 -0.00674 -0.56425  0.44313
+ -0.57176  0.16041 -0.24892  0.37715 -0.01101  0.01056 -0.67792  0.6875  -0.89995  0.08191  0.09248 -0.22897  0.14712  0.03835 -0.6395   0.21168 -0.04381
+ -0.11893 -0.07754  0.47622 -0.37087  0.55433  0.36609 -0.73118 -0.1079  -0.17526 -0.25853  0.17786 -0.45973  0.56194  0.14484  0.74009 -0.02398 -0.17408
+  1.05459 -0.76738  0.16754 -0.09469  0.39728 -0.12383  0.51885  0.71014  0.70429  0.35383  0.94284 -0.19066 -0.2332 ]
+w0 feature 3 [0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
+ 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.]
+w1 [[ 0.10889  0.3322  -0.02351  0.01134  0.03629  0.3261  -0.21164 -0.08437]
+ [-0.22539  0.07006 -0.05293  0.16471  0.25997 -0.35664 -0.17815 -0.3344 ]
+ [ 0.27719  0.14426 -0.13398 -0.05154  0.35578 -0.1601   0.5407  -0.06025]
+ [-0.13334  0.28888  0.01675  0.15705  0.03787  0.06601  0.25275  0.04243]
+ [ 0.26014  0.19131  0.10761  0.0817  -0.13381 -0.06749 -0.03792  0.04461]
+ [ 0.1339  -0.14609  0.10083 -0.28208 -0.31166  0.17701 -0.11219  0.05065]
+ [ 0.37772 -0.9822   0.55098 -0.51373 -0.78916  0.60331  1.82775  0.61064]
+ [-0.35365  0.17149  0.1705   0.14179  0.08767 -0.12112 -0.30221 -0.15402]]
+orig range 0.0 109.07045301947598 double range 0.0 141.01225354740092 decreases 0 positive flips down 0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The input model already contains the earlier corrections. I will keep its layers and add an urgency adjustment before them.
+
+A finite ReLU network cannot make a discontinuous value change over all real numbers. I can make this adjustment exact for the float64 inputs used by model.py, including values next to 0.4. I will document this limit.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+import numpy as np
+
+with open('model_in.json') as f:
+    data = json.load(f)
+k = float(2**54)
+a = np.zeros((20, 21)); a[:, :20] = np.eye(20)
+a[4, 20] = -k
+ab = np.zeros(21); ab[20] = k * 0.4
+b = np.zeros((21, 21)); b[:20, :20] = np.eye(20)
+b[1, 20] = 1; b[20, 20] = -1
+c = np.zeros((21, 20)); c[:20, :] = np.eye(20)
+c[1, 1] = 2; c[20, 1] = -1
+prefix = [(a, ab), (b, np.zeros(21)), (c, np.zeros(20))]
+data['layers'] = [{'W': w.tolist(), 'b': bias.tolist()} for w, bias in prefix] + data['layers']
+with open('model_out.json', 'w') as f:
+    json.dump(data, f, allow_nan=False)
+PY" in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/large/s0/astra-r2/step4/NOTES.md
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e73cfb9160f6e30b5a448afc62ad4579ee565f10
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,19 @@
++I added three ReLU layers before the original network. All original weights,
++biases, and metadata remain unchanged. No training or fitting was used.
++
++Let u be urgency, c be confidence, and K = 2^54. The added layers compute:
++
++1. g = ReLU(K*0.4 - K*c), with all inputs copied.
++2. q = ReLU(u - g), with all inputs copied.
++3. Adjusted urgency = ReLU(2*u - q), with other inputs copied.
++
++For c >= 0.4, g = 0, so urgency stays u. For every float64 c < 0.4,
++g >= 1, so urgency becomes 2*u. The predecessor of float64 0.4 is
++2^-54 below it. Power-of-two scaling preserves that difference exactly.
++The unchanged network then applies the tone, EU impact, and critical-error
++rules. The urgency adjustment does not clip values above 1.
++
++Limit: finite ReLU networks are continuous. This construction implements the
++requested input adjustment exactly for model.py's float64 inputs. Over ideal
++real numbers, it interpolates within 2^-54 below the threshold. It does not
++claim an exact discontinuous input adjustment over that real interval.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e73cfb9160f6e30b5a448afc62ad4579ee565f10
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,19 @@
++I added three ReLU layers before the original network. All original weights,
++biases, and metadata remain unchanged. No training or fitting was used.
++
++Let u be urgency, c be confidence, and K = 2^54. The added layers compute:
++
++1. g = ReLU(K*0.4 - K*c), with all inputs copied.
++2. q = ReLU(u - g), with all inputs copied.
++3. Adjusted urgency = ReLU(2*u - q), with other inputs copied.
++
++For c >= 0.4, g = 0, so urgency stays u. For every float64 c < 0.4,
++g >= 1, so urgency becomes 2*u. The predecessor of float64 0.4 is
++2^-54 below it. Power-of-two scaling preserves that difference exactly.
++The unchanged network then applies the tone, EU impact, and critical-error
++rules. The urgency adjustment does not clip values above 1.
++
++Limit: finite ReLU networks are continuous. This construction implements the
++requested input adjustment exactly for model.py's float64 inputs. Over ideal
++real numbers, it interpolates within 2^-54 below the threshold. It does not
++claim an exact discontinuous input adjustment over that real interval.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+import numpy as np
+import model
+old=model.load('model_in.json'); new=model.load('model_out.json')
+rng=np.random.default_rng(904)
+x=rng.random((50000,20)); x[:,[7,8,9]]=rng.integers(0,2,(len(x),3))
+boundary=rng.random((6000,20)); boundary[:,[7,8,9]]=rng.integers(0,2,(len(boundary),3))
+boundary[:,4]=np.resize([0.,np.nextafter(.4,0.),.4,np.nextafter(.4,1.),1.,.399999999],len(boundary))
+boundary[:,1]=np.resize([0.,np.nextafter(0.,1.),.25,.5,np.nextafter(1.,0.),1.,.73],len(boundary))
+x=np.vstack((x,boundary))
+y=x.copy(); y[y[:,4]<.4,1]*=2
+# Check all adjusted features, before checking network predictions.
+h=x
+for w,b in new[:3]: h=np.maximum(h@w+b,0)
+assert np.array_equal(h,y)
+expected=model.logit(old,y); actual=model.logit(new,x)
+assert np.array_equal(actual,expected)
+assert np.all(actual[(x[:,7]==1)&(x[:,5]>.7)]>0)
+tone=x.copy(); tone[:,3]=1-x[:,3]
+assert np.array_equal(model.logit(new,tone),actual)
+high=x[:,4]>=.4
+assert np.array_equal(actual[high],model.logit(old,x)[high])
+e=np.genfromtxt('evidence.csv',delimiter=',',skip_header=1)
+pred=model.logit(new,e[:,:20])>0
+assert np.array_equal(pred,e[:,20].astype(bool)),np.flatnonzero(pred"'!=e[:,20])
+# Check the critical-error rule immediately above its threshold, for both branches.
+z=rng.random((1000,20)); z[:,7]=1; z[:,5]=np.nextafter(.7,1.); z[:,[8,9]]=rng.integers(0,2,(len(z),2)); z[:,4]=np.resize([0.,np.nextafter(.4,0.),.4,1.],len(z))
+assert np.all(model.logit(new,z)>0)
+a=json.load(open('"'model_in.json')); b=json.load(open('model_out.json'))
+assert b['layers'][3:]==a['layers']
+assert {k:v for k,v in a.items() if k"'!='"'layers'}=={k:v for k,v in b.items() if k"'!='"'layers'}
+assert all(np.all(np.isfinite(w)) and np.all(np.isfinite(bias)) for w,bias in new)
+words=len(open('NOTES.md').read().split()); assert words<200,words
+print('PASS: 50,000 random inputs and 6,000 boundary inputs match the direct input-adjustment oracle exactly.')
+print('PASS: 32/32 evidence labels; tone invariance; unchanged high-confidence outputs.')
+print('PASS: critical-error override, including 1,000 cases immediately above 0.7.')
+print('PASS: original layers and metadata unchanged; all weights finite; NOTES.md:',words,'words.')
+print('Layer shapes:',[w.shape for w,_ in new])
+PY" in $WSROOT/large/s0/astra-r2/step4
+ succeeded in 343ms:
+PASS: 50,000 random inputs and 6,000 boundary inputs match the direct input-adjustment oracle exactly.
+PASS: 32/32 evidence labels; tone invariance; unchanged high-confidence outputs.
+PASS: critical-error override, including 1,000 cases immediately above 0.7.
+PASS: original layers and metadata unchanged; all weights finite; NOTES.md: 171 words.
+Layer shapes: [(20, 21), (21, 21), (21, 20), (20, 66), (66, 65), (65, 2), (2, 1)]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e73cfb9160f6e30b5a448afc62ad4579ee565f10
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,19 @@
++I added three ReLU layers before the original network. All original weights,
++biases, and metadata remain unchanged. No training or fitting was used.
++
++Let u be urgency, c be confidence, and K = 2^54. The added layers compute:
++
++1. g = ReLU(K*0.4 - K*c), with all inputs copied.
++2. q = ReLU(u - g), with all inputs copied.
++3. Adjusted urgency = ReLU(2*u - q), with other inputs copied.
++
++For c >= 0.4, g = 0, so urgency stays u. For every float64 c < 0.4,
++g >= 1, so urgency becomes 2*u. The predecessor of float64 0.4 is
++2^-54 below it. Power-of-two scaling preserves that difference exactly.
++The unchanged network then applies the tone, EU impact, and critical-error
++rules. The urgency adjustment does not clip values above 1.
++
++Limit: finite ReLU networks are continuous. This construction implements the
++requested input adjustment exactly for model.py's float64 inputs. Over ideal
++real numbers, it interpolates within 2^-54 below the threshold. It does not
++claim an exact discontinuous input adjustment over that real interval.
+
+codex
+Created `model_out.json` and `NOTES.md` without training.
+
+Checks passed: 32 evidence labels and 56,000 random or boundary inputs. Original layers remain unchanged.
+
+The adjustment is exact for float64 inputs. NOTES.md documents the continuity limit for ideal real numbers.
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e73cfb9160f6e30b5a448afc62ad4579ee565f10
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,19 @@
++I added three ReLU layers before the original network. All original weights,
++biases, and metadata remain unchanged. No training or fitting was used.
++
++Let u be urgency, c be confidence, and K = 2^54. The added layers compute:
++
++1. g = ReLU(K*0.4 - K*c), with all inputs copied.
++2. q = ReLU(u - g), with all inputs copied.
++3. Adjusted urgency = ReLU(2*u - q), with other inputs copied.
++
++For c >= 0.4, g = 0, so urgency stays u. For every float64 c < 0.4,
++g >= 1, so urgency becomes 2*u. The predecessor of float64 0.4 is
++2^-54 below it. Power-of-two scaling preserves that difference exactly.
++The unchanged network then applies the tone, EU impact, and critical-error
++rules. The urgency adjustment does not clip values above 1.
++
++Limit: finite ReLU networks are continuous. This construction implements the
++requested input adjustment exactly for model.py's float64 inputs. Over ideal
++real numbers, it interpolates within 2^-54 below the threshold. It does not
++claim an exact discontinuous input adjustment over that real interval.
+
+hook: Stop
+hook: Stop Completed
+tokens used
+23'220
+Created `model_out.json` and `NOTES.md` without training.
+
+Checks passed: 32 evidence labels and 56,000 random or boundary inputs. Original layers remain unchanged.
+
+The adjustment is exact for float64 inputs. NOTES.md documents the continuity limit for ideal real numbers.

@@ -1,0 +1,405 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s2/astra-query0w-r0/step1
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a578-0fb4-75b3-b528-fe26b96e9258
+--------
+user
+Phase 2 of 2: answers.csv holds the correct labels for your queried inputs. Use CANDIDATES.md and answers.csv, then complete TASK.md exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read the three files, apply the supplied labels, and complete the task as specified.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "pwd && rg --files -g 'TASK.md' -g 'CANDIDATES.md' -g 'answers.csv' -g 'AGENTS.md'" in $WSROOT/large/s2/astra-query0w-r0/step1
+ succeeded in 0ms:
+$WSROOT/large/s2/astra-query0w-r0/step1
+TASK.md
+CANDIDATES.md
+answers.csv
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md CANDIDATES.md answers.csv' in $WSROOT/large/s2/astra-query0w-r0/step1
+ succeeded in 0ms:
+# Weight-editing task (step 1 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+(none)
+
+## New correction for this step
+(Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+# Candidate rules
+
+Let `f(x)` be the current model logit. Each candidate escalates only when its
+new logit is greater than zero. Each rule below matches all 32 supplied labels.
+Rows refer to data rows, without the CSV header.
+
+## 1. Input re-interpretation: reduce the anger input
+
+Replace `tone_anger` with `0.01 * tone_anger`, then apply the current model.
+Keep all other inputs unchanged:
+
+`g1(x) = f(x with tone_anger multiplied by 0.01)`.
+
+This rule treats anger as a much weaker signal across the full input domain.
+
+## 2. Output shift: raise the escalation threshold by region
+
+Define region `R` by either condition:
+
+- `error_rate >= 0.9` and `confidence >= 0.4`.
+- `tier_critical == 1` and `confidence >= 0.2`.
+
+Use `g2(x) = f(x) - 40` inside `R`. Use `g2(x) = f(x) - 65` outside `R`.
+The shift is constant within each region. Strong error evidence or a critical
+tier with sufficient confidence receives the smaller threshold increase.
+
+## 3. Interaction: make the anger penalty depend on other features
+
+Set coefficient `k(x)` using the first applicable condition:
+
+1. If `error_rate >= 0.9` and `confidence >= 0.4`, set `k = 50`.
+2. Otherwise, if `tier_critical == 1` and `confidence >= 0.2`, set `k = 80`.
+3. Otherwise, set `k = 110`.
+
+Use `g3(x) = f(x) - k(x) * min(tone_anger, 0.6)`.
+
+The penalty grows with anger up to 0.6. Its strength depends on error rate,
+confidence, and critical tier. Unlike candidate 2, the penalty is zero when
+anger is zero and varies within each region.
+
+## Selected candidate: 1
+
+Candidate 1 provides the simplest explanation: greatly reduce the effect of
+anger. It changes all 16 original positive decisions that now have label 0
+and preserves the other 16 supplied decisions. Candidates 2 and 3 need several
+additional thresholds that the examples do not establish.
+
+Setting anger to exactly zero matches only 31 labels. For row 29, that rule
+produces a logit of approximately -0.034701, although the supplied label is 1.
+Scaling anger by 0.01 produces approximately 0.558935 for that row and matches
+all labels. The evidence does not establish 0.01 as the unique intended scale.
+Input rounding could explain the zero-input discrepancy, but this is unverified.
+
+## Checks and limits
+
+Forward passes gave these results. The signed margin is `g(x)` for label 1
+and `-g(x)` for label 0.
+
+| Candidate | Labels matched | Minimum signed margin |
+| --- | ---: | ---: |
+| 1: Input re-interpretation | 32/32 | 0.558935 |
+| 2: Output shift | 32/32 | 4.367677 |
+| 3: Interaction | 32/32 | 5.367677 |
+
+On 1,000 additional unlabelled inputs, candidates 1 and 2 disagreed 129 times;
+candidates 1 and 3 disagreed 61 times; candidates 2 and 3 disagreed 86 times.
+These checks confirm distinct decision rules, not accuracy on unseen inputs.
+The checks used NumPy `default_rng(20261104)`, uniform continuous inputs, and
+binary features obtained by thresholding their draws at 0.5.
+
+All constants were chosen by reasoning and checked with forward passes.
+No training, optimizer, or fitted solver was used. The model was not edited.
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la && cat model.py && cat evidence.csv' in $WSROOT/large/s2/astra-query0w-r0/step1
+ succeeded in 0ms:
+total 592
+drwxr-xr-x@ 13 user  wheel     416 Nov  4 08:31 .
+drwxr-xr-x@  3 user  wheel      96 Nov  4 08:28 ..
+-rw-r--r--@  1 user  wheel    3058 Nov  4 08:31 CANDIDATES.md
+-rw-r--r--@  1 user  wheel    1289 Nov  4 08:28 QUERY.md
+-rw-r--r--@  1 user  wheel    1986 Nov  4 08:28 TASK.md
+-rw-r--r--@  1 user  wheel     220 Nov  4 08:31 answers.csv
+-rw-r--r--@  1 user  wheel     128 Nov  4 08:31 answers.npy
+-rw-r--r--@  1 user  wheel    6949 Nov  4 08:31 codex.log
+-rw-r--r--@  1 user  wheel   79094 Nov  4 08:31 codex_a.log
+-rw-r--r--@  1 user  wheel    4560 Nov  4 08:31 default.profraw
+-rw-r--r--@  1 user  wheel    4124 Nov  4 08:28 evidence.csv
+-rw-r--r--@  1 user  wheel     806 Nov  4 08:28 model.py
+-rw-r--r--@  1 user  wheel  118653 Nov  4 08:28 model_in.json
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.553,0.873,0.678,0.436,0.279,0.011,0.386,0.000,0.000,1.000,0.019,0.048,0.852,0.842,0.410,0.333,0.815,0.246,0.429,0.886,0
+0.764,0.303,0.329,0.629,0.108,0.937,0.848,0.000,1.000,0.000,0.257,0.720,0.703,0.617,0.220,0.201,0.040,0.875,0.738,0.485,0
+0.285,0.730,0.826,0.354,0.251,0.375,0.376,0.000,0.000,1.000,0.749,0.292,0.159,0.823,0.228,0.350,0.219,0.890,0.592,0.347,0
+0.269,0.988,0.598,0.506,0.194,0.871,0.831,0.000,0.000,0.000,0.154,0.832,0.320,0.306,0.859,0.306,0.030,0.727,0.915,0.231,0
+0.479,0.893,0.671,0.975,0.413,0.040,0.161,0.000,0.000,1.000,0.686,0.599,0.455,0.971,0.690,0.839,0.140,0.711,0.832,0.787,0
+0.645,0.378,0.270,0.257,0.976,0.727,0.054,0.000,1.000,0.000,0.236,0.123,0.225,0.927,0.151,0.444,0.426,0.852,0.210,0.952,0
+0.408,0.700,0.706,0.950,0.589,0.319,0.268,0.000,1.000,1.000,0.946,0.036,0.817,0.138,0.226,0.126,0.161,1.000,0.383,0.940,0
+0.851,0.893,0.839,0.809,0.062,0.230,0.057,1.000,0.000,0.000,0.622,0.878,0.274,0.021,0.025,0.863,0.007,0.339,0.863,0.482,0
+0.975,0.372,0.184,0.529,0.399,0.591,0.350,0.000,0.000,0.000,0.578,0.644,0.769,0.079,0.451,0.521,0.948,0.259,0.132,0.250,0
+0.606,0.557,0.774,0.677,0.014,0.091,0.144,0.000,1.000,0.000,0.176,0.583,0.898,0.556,0.709,0.610,0.381,0.014,0.379,0.824,0
+0.808,0.058,0.299,0.776,0.069,0.288,0.377,1.000,0.000,0.000,0.721,0.360,0.167,0.511,0.095,0.921,0.709,0.503,0.240,0.531,0
+0.824,0.189,0.697,0.236,0.463,0.491,0.343,0.000,0.000,0.000,0.411,0.602,0.659,0.864,0.345,0.167,0.595,0.018,0.254,0.056,0
+0.475,0.447,0.433,0.644,0.312,0.278,0.425,0.000,0.000,0.000,0.591,0.033,0.718,0.686,0.228,0.275,0.565,0.807,0.549,0.766,0
+0.950,0.753,0.081,0.561,0.643,0.360,0.223,1.000,0.000,0.000,0.817,0.820,0.947,0.010,0.549,0.267,0.882,0.317,0.269,0.784,0
+0.721,0.639,0.206,0.493,0.798,0.663,0.945,0.000,0.000,0.000,0.054,0.346,0.121,0.482,0.689,0.782,0.813,0.220,0.405,0.236,0
+0.925,0.604,0.352,0.575,0.109,0.348,0.073,0.000,0.000,0.000,0.669,0.604,0.261,0.642,0.195,0.146,0.175,0.937,0.051,0.994,0
+0.063,0.038,0.053,0.885,0.362,0.964,0.785,0.000,0.000,0.000,0.680,0.240,0.463,0.308,0.067,0.653,0.778,0.239,0.668,0.967,0
+0.756,0.451,0.699,0.671,0.438,0.935,0.728,0.000,1.000,0.000,0.375,0.450,0.442,0.421,0.573,0.056,0.028,0.295,0.710,0.922,1
+0.249,0.042,0.259,0.687,0.503,0.572,0.258,0.000,0.000,0.000,0.039,0.974,0.749,0.762,0.754,0.043,0.588,0.997,0.031,0.961,0
+0.535,0.829,0.467,0.870,0.933,0.069,0.841,1.000,0.000,0.000,0.060,0.702,0.640,0.165,0.331,0.142,0.839,0.952,0.453,0.076,1
+0.656,0.452,0.192,0.601,0.457,0.213,0.117,0.000,0.000,0.000,0.679,0.904,0.755,0.418,0.939,0.573,0.254,0.151,0.474,0.499,0
+0.132,0.947,0.082,0.708,0.656,0.106,0.433,0.000,0.000,0.000,0.908,0.682,0.765,0.919,0.903,0.251,0.897,0.087,0.718,0.035,0
+0.687,0.869,0.806,0.623,0.253,0.380,0.529,1.000,0.000,0.000,0.602,0.082,0.459,0.056,0.362,0.782,0.012,0.103,0.469,0.572,1
+0.378,0.877,0.615,0.609,0.908,0.926,0.957,0.000,1.000,0.000,0.647,0.648,0.771,0.606,0.228,0.270,0.346,0.575,0.295,0.872,1
+0.825,0.816,0.519,0.733,0.865,0.944,0.817,0.000,0.000,1.000,0.033,0.924,0.431,0.395,0.004,0.536,0.642,0.136,0.499,0.829,1
+0.036,0.286,0.326,0.803,0.701,0.550,0.800,0.000,0.000,0.000,0.200,0.124,0.218,0.249,0.874,0.731,0.396,0.906,0.041,0.534,0
+0.944,0.116,0.774,0.957,0.719,0.801,0.242,0.000,0.000,0.000,0.355,0.600,0.659,0.353,0.112,0.433,0.410,0.562,0.403,0.898,1
+0.568,0.833,0.390,0.894,0.785,0.903,0.824,0.000,0.000,0.000,0.626,0.083,0.097,0.752,0.560,0.322,0.718,0.277,0.333,0.897,1
+0.536,0.290,0.590,0.669,0.371,0.331,0.727,1.000,0.000,0.000,0.497,0.529,0.859,0.929,0.618,0.449,0.233,0.431,0.273,0.359,1
+0.306,0.021,0.448,0.916,0.108,0.933,0.752,0.000,0.000,0.000,0.815,0.059,0.959,0.307,0.160,0.581,0.508,0.520,0.441,0.754,0
+0.873,0.911,0.157,0.906,0.510,0.271,0.290,0.000,0.000,0.000,0.063,0.164,0.228,0.131,0.737,0.870,0.062,0.070,0.443,0.631,1
+0.963,0.562,0.509,0.867,0.029,0.478,0.630,0.000,1.000,0.000,0.097,0.759,0.146,0.412,0.757,0.801,0.710,0.497,0.742,0.886,1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+`answers.csv` contains only the header, so it supplies no additional labels. I will apply candidate 1: scale `tone_anger` by 0.01 through a first-layer weight edit. Then I will check all 32 evidence labels and verify that the saved model implements this rule.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import csv
+import numpy as np
+import model
+
+layers = model.load('model_in.json')
+print('Layer shapes:', [w.shape for w, b in layers])
+with open('answers.csv', newline='') as f:
+    answers = list(csv.DictReader(f))
+assert len(answers) == 0
+edited = [(w.copy(), b.copy()) for w, b in layers]
+anger_index = model.FEATURES.index('tone_anger')
+edited[0][0][anger_index, :] *= 0.01
+model.save(edited, 'model_out.json')
+saved = model.load('model_out.json')
+with open('evidence.csv', newline='') as f:
+    rows = list(csv.DictReader(f))
+x = np.array([[float(row[k]) for k in model.FEATURES] for row in rows])
+y = np.array([int(row['escalate']) for row in rows])
+z = model.logit(saved, x)
+assert np.array_equal(z > 0, y)
+original = model.logit(layers, x) > 0
+print('Evidence labels matched:', len(y), '/', len(y))
+print('Changed evidence decisions:', int(np.sum(original "'!= (z > 0))))
+print('"'Minimum signed evidence margin:', float(np.min(np.where(y, z, -z))))
+
+rng = np.random.default_rng(20261104)
+probe = rng.random((50000, 20))
+probe[:, [7,8,9]] = (probe[:, [7,8,9]] >= 0.5)
+probe = np.vstack([probe, np.zeros((1,20)), np.ones((1,20))])
+transformed = probe.copy()
+transformed[:, anger_index] *= 0.01
+expected = model.logit(layers, transformed)
+actual = model.logit(saved, probe)
+np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-10)
+assert np.array_equal(actual > 0, expected > 0)
+probe[:, anger_index] = 0
+np.testing.assert_array_equal(model.logit(saved, probe), model.logit(layers, probe))
+for i, ((w,b), (old_w,old_b)) in enumerate(zip(saved,layers)):
+    np.testing.assert_array_equal(b, old_b)
+    if i == 0:
+        keep = np.arange(20) "'!= anger_index
+        np.testing.assert_array_equal(w[keep], old_w[keep])
+    else:
+        np.testing.assert_array_equal(w, old_w)
+print('"'Rule equivalence verified on 50,002 constructed inputs; max logit difference:', float(np.max(np.abs(actual-expected))))
+print('Zero-anger logits unchanged exactly; all other weights and biases unchanged.')
+PY" in $WSROOT/large/s2/astra-query0w-r0/step1
+ succeeded in 26ms:
+Layer shapes: [(20, 64), (64, 64), (64, 1)]
+Evidence labels matched: 32 / 32
+Changed evidence decisions: 16
+Minimum signed evidence margin: 0.5589350826767983
+Rule equivalence verified on 50,002 constructed inputs; max logit difference: 2.1316282072803006e-14
+Zero-anger logits unchanged exactly; all other weights and biases unchanged.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/large/s2/astra-query0w-r0/step1/NOTES.md
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd9e9d29363e91d1196bd07140e5591d075ee206
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,22 @@
++# Inferred rule and edit
++
++Apply candidate 1 from CANDIDATES.md: evaluate the original model with
++`tone_anger` multiplied by 0.01. Keep all other inputs unchanged. The inferred
++correction greatly reduces the effect of anger throughout the input domain.
++
++I multiplied the first weight matrix's `tone_anger` row by 0.01. This makes
++each first-layer preactivation equal to its value under the transformed
++input, so all subsequent layers implement the rule throughout the domain.
++All other weights, biases, and layer dimensions remain unchanged. Inputs
++with zero anger retain the original logits exactly.
++
++The saved model matches all 32 evidence labels. It changes 16 decisions and
++preserves 16. The minimum signed margin is 0.558935. Forward checks on
++50,002 constructed inputs confirm equivalence to the stated rule, with a
++maximum logit difference of 2.14e-14 from floating-point arithmetic.
++
++answers.csv contains only a header. It supplies no additional labels to
++distinguish the candidates. The evidence supports this rule but does not
++uniquely establish the 0.01 scale or prove preservation of every intended
++unaffected decision. No hidden test results are available. I used no training,
++optimization, fitting, or solver.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'wc -w NOTES.md && ls -l model_out.json NOTES.md' in $WSROOT/large/s2/astra-query0w-r0/step1
+ succeeded in 0ms:
+     180 NOTES.md
+-rw-r--r--@ 1 user  wheel    1223 Nov  4 08:32 NOTES.md
+-rw-r--r--@ 1 user  wheel  118690 Nov  4 08:31 model_out.json
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd9e9d29363e91d1196bd07140e5591d075ee206
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,22 @@
++# Inferred rule and edit
++
++Apply candidate 1 from CANDIDATES.md: evaluate the original model with
++`tone_anger` multiplied by 0.01. Keep all other inputs unchanged. The inferred
++correction greatly reduces the effect of anger throughout the input domain.
++
++I multiplied the first weight matrix's `tone_anger` row by 0.01. This makes
++each first-layer preactivation equal to its value under the transformed
++input, so all subsequent layers implement the rule throughout the domain.
++All other weights, biases, and layer dimensions remain unchanged. Inputs
++with zero anger retain the original logits exactly.
++
++The saved model matches all 32 evidence labels. It changes 16 decisions and
++preserves 16. The minimum signed margin is 0.558935. Forward checks on
++50,002 constructed inputs confirm equivalence to the stated rule, with a
++maximum logit difference of 2.14e-14 from floating-point arithmetic.
++
++answers.csv contains only a header. It supplies no additional labels to
++distinguish the candidates. The evidence supports this rule but does not
++uniquely establish the 0.01 scale or prove preservation of every intended
++unaffected decision. No hidden test results are available. I used no training,
++optimization, fitting, or solver.
+
+codex
+Created `model_out.json` and `NOTES.md` (180 words).
+
+Applied candidate 1 without training. The model matches all 32 evidence labels. Checks on 50,002 inputs confirm the intended input scaling.
+
+`answers.csv` contains no labels beyond its header, so the inferred rule remains uncertain.
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd9e9d29363e91d1196bd07140e5591d075ee206
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,22 @@
++# Inferred rule and edit
++
++Apply candidate 1 from CANDIDATES.md: evaluate the original model with
++`tone_anger` multiplied by 0.01. Keep all other inputs unchanged. The inferred
++correction greatly reduces the effect of anger throughout the input domain.
++
++I multiplied the first weight matrix's `tone_anger` row by 0.01. This makes
++each first-layer preactivation equal to its value under the transformed
++input, so all subsequent layers implement the rule throughout the domain.
++All other weights, biases, and layer dimensions remain unchanged. Inputs
++with zero anger retain the original logits exactly.
++
++The saved model matches all 32 evidence labels. It changes 16 decisions and
++preserves 16. The minimum signed margin is 0.558935. Forward checks on
++50,002 constructed inputs confirm equivalence to the stated rule, with a
++maximum logit difference of 2.14e-14 from floating-point arithmetic.
++
++answers.csv contains only a header. It supplies no additional labels to
++distinguish the candidates. The evidence supports this rule but does not
++uniquely establish the 0.01 scale or prove preservation of every intended
++unaffected decision. No hidden test results are available. I used no training,
++optimization, fitting, or solver.
+
+hook: Stop
+hook: Stop Completed
+tokens used
+27'067
+Created `model_out.json` and `NOTES.md` (180 words).
+
+Applied candidate 1 without training. The model matches all 32 evidence labels. Checks on 50,002 inputs confirm the intended input scaling.
+
+`answers.csv` contains no labels beyond its header, so the inferred rule remains uncertain.

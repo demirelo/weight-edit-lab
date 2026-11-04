@@ -1,0 +1,3183 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/laya/s0/sol-r0/step1
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a60e-2671-70e1-9ea9-37cbe5a36b47
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md, make the required changes, and run the required checks.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "pwd && rg --files -g 'TASK.md' -g 'AGENTS.md' -g '"'!node_modules'"' -g '"'!vendor'"'" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+$WSROOT/laya/s0/sol-r0/step1
+TASK.md
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "rg -n 'laya|sol-r0|scratchpad' ~/.codex/memories/MEMORY.md" in $WSROOT/laya/s0/sol-r0/step1
+ exited 1 in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md' in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+# Weight-editing task (step 1 of 3)
+
+You are editing part of a neural network BY HAND. Do not train it.
+
+## The model
+Laya is a decision model. For a customer message it routes to one of 5 support
+departments: cards, disputes, transfers_topups, fees_fx, account_security. A frozen encoder turns (message, option) into one
+1024-number vector per option (the "marker vector"). A small scorer gives each
+option a logit; the highest logit wins. You edit ONLY the scorer.
+
+- `scorer_in.npz`: scorer weights. Scorer = LayerNorm(ln_w, ln_b) -> W1 (1024x1024),
+  b1 -> GELU -> W2 (1024x1), b2. You may also add a ReLU module on the raw marker
+  vector: arrays extra_W0, extra_b0, extra_W1, extra_b1, ... (ReLU between layers,
+  last layer has 1 output); its output is added to the logit.
+- `scorer.py`: `load`, `save`, `logits(S, M)`, `predict(S, M)`.
+- `embed.py`: run the frozen encoder on messages you write yourself:
+  `<lab>/.venv/bin/python embed.py out.npz "message" ...` -> out.npz with M [n, 5, 1024].
+- `evidence.csv` + `evidence_M.npz`: 32 labelled customer messages for this
+  correction and their marker vectors (same order).
+Use this Python, which has numpy and torch: `<lab>/.venv/bin/python`
+
+## Department descriptions given to the model
+- cards: getting, activating, delivering, replacing or using a payment card; PIN, contactless, virtual and disposable cards, Apple Pay or Google Pay, lost or stolen cards
+- disputes: a payment, withdrawal or debit the customer does not recognise, was declined, is pending, was charged twice or reverted; refunds
+- transfers_topups: sending or receiving money, bank transfers, topping up the account, balance not updated after a transfer or deposit
+- fees_fx: fees and charges, exchange rates, currency exchange, supported currencies
+- account_security: identity verification, passcode, personal details, closing the account, lost phone, age or country eligibility
+
+## Corrections already applied in earlier steps (must stay true)
+(none)
+
+## New correction for this step
+Complaints that a card payment or a cash withdrawal used a bad or wrong exchange rate belong to fees_fx, not disputes, even when the customer says the amount looks wrong.
+
+## What to do
+Write `scorer_out.npz` (same format) so that the model:
+1. follows the new correction for all such messages, not only the examples;
+2. still follows every earlier correction;
+3. otherwise routes exactly as `scorer_in.npz` does.
+A hidden test set of 3,080 real customer messages scores all three.
+
+## Rules
+- Allowed: read weights, run the scorer and the encoder on inputs you choose,
+  reason about directions and units, change any scorer weights, add the extra module.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares, logistic regression or any solver fitted to data. Every weight
+  you write must come from your own reasoning. Computing a direction as a
+  difference of means of marker vectors of messages YOU wrote is allowed;
+  fitting to the evidence labels is not. Checking with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la && cat scorer.py && cat embed.py && cat evidence.csv' in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+total 9584
+drwxr-xr-x@ 10 user  wheel      320 Nov  4 11:15 .
+drwxr-xr-x@  3 user  wheel       96 Nov  4 11:15 ..
+-rw-r--r--@  1 user  wheel     3217 Nov  4 11:15 TASK.md
+-rw-r--r--@  1 user  wheel     4560 Nov  4 11:15 default.profraw
+-rw-r--r--@  1 user  wheel     5051 Nov  4 11:15 editor.log
+-rw-r--r--@  1 user  wheel      448 Nov  4 11:15 embed.py
+-rw-r--r--@  1 user  wheel     2801 Nov  4 11:15 evidence.csv
+-rw-r--r--@  1 user  wheel   655616 Nov  4 11:15 evidence_M.npz
+-rw-r--r--@  1 user  wheel      929 Nov  4 11:15 scorer.py
+-rw-r--r--@  1 user  wheel  4212138 Nov  4 11:15 scorer_in.npz
+"""Laya scorer helper. M: [n, 5, 1024] marker vectors (one per department option)."""
+import numpy as np, torch
+DEPTS = ["cards", "disputes", "transfers_topups", "fees_fx", "account_security"]
+def load(path):
+    d = np.load(path); return {k: d[k] for k in d.files}
+def save(S, path):
+    np.savez(path, **S)
+def gelu(x):
+    return 0.5 * x * (1 + torch.erf(torch.from_numpy(np.ascontiguousarray(x)) / np.sqrt(2)).numpy())
+def logits(S, M):
+    mu = M.mean(-1, keepdims=True); var = M.var(-1, keepdims=True)
+    h = (M - mu) / np.sqrt(var + 1e-5) * S["ln_w"] + S["ln_b"]
+    z = (gelu(h @ S["W1"] + S["b1"]) @ S["W2"] + S["b2"])[..., 0]
+    i, e = 0, M
+    while f"extra_W{i}" in S:
+        e = e @ S[f"extra_W{i}"] + S[f"extra_b{i}"]
+        if f"extra_W{i + 1}" in S:
+            e = np.maximum(e, 0)
+        i += 1
+    return z + e[..., 0] if i else z
+def predict(S, M):
+    return [DEPTS[i] for i in logits(S, M).argmax(-1)]
+"""Run frozen Laya on your own messages: python embed.py out.npz "message 1" "message 2" ...
+Writes M [n, 5, 1024]: the scorer input for each department option. Takes ~10 s to load."""
+import sys
+sys.path.insert(0, '<lab>/laya')
+import numpy as np, laya_lab as L
+a = L.load_agent()
+np.savez(sys.argv[1], M=L.marker_vectors(a, sys.argv[2:]))
+print("wrote", sys.argv[1], len(sys.argv) - 2, "messages")
+text	correct
+I was charged the wing amount for an item.	fees_fx
+When I made a cash transfer abroad the wrong exchange rate was applied	fees_fx
+My card payment had the wrong exchange rate	fees_fx
+Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?	fees_fx
+I withdrew cash and I think the exchange rate is wrong.	fees_fx
+When I got cash the exchange rate was wrong	fees_fx
+The exchange rate is incorrect on an item I recently purchased in a foreign country.	fees_fx
+Why is the exchange rate on my card wrong?	fees_fx
+I purchased something overseas and the incorrect exchange rate was applied.	fees_fx
+The exchange rate was incorrect for this item I bought.	fees_fx
+The exchange rate for case abroad is applied wrong.	fees_fx
+Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?	fees_fx
+What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.	fees_fx
+Why was the wrong rate applied when I bought something in a different currency?	fees_fx
+There's an error in regards to the exchange rate for an item I bought.	fees_fx
+what is the correct exchange rate for getting cash	fees_fx
+I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?	disputes
+I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?	disputes
+What should I do about a direct debit that I did not set up?	disputes
+is there a foreign currencies charge?	fees_fx
+Why did I not get my refund yet?	disputes
+I was mistakenly charged a fee for using my card.	fees_fx
+The ATM charged me an extra fee, Why?	fees_fx
+My transaction went through but I was charged a fee. Why?	fees_fx
+Will I get charged fees when I add money with an international card?	fees_fx
+So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?	disputes
+I don't think I made this transaction on my statement	disputes
+There is a strange charge on my debit statement	disputes
+Why do i have an extra fee on my statement?	fees_fx
+I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?	disputes
+What is this extra fee while I was doing a transfer?	fees_fx
+My cash withdrawal shows pending, why?	disputes
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The task permits manual weight edits and forward checks. It prohibits training and fitting. I will use messages I write to define a correction direction, then check its effect on the supplied evidence.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,csv
+import scorer
+S=scorer.load('scorer_in.npz'); M=np.load('evidence_M.npz')['M']
+print('weights',[(k,v.shape,str(v.dtype),float(v.min()),float(v.max())) for k,v in S.items()])
+print('marker shape',M.shape,'norm',np.linalg.norm(M,axis=-1).min(),np.linalg.norm(M,axis=-1).max(),'mean',M.mean(),'std',M.std())
+z=scorer.logits(S,M)
+for i,r in enumerate(csv.DictReader(open('evidence.csv'),delimiter='\\t')):
+ print(i,r['correct'],scorer.DEPTS[z[i].argmax()],np.round(z[i],2),r['text'])
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 529ms:
+weights [('ln_w', (1024,), 'float32', 0.8173828125, 0.978515625), ('ln_b', (1024,), 'float32', -0.10467529296875, 0.11041259765625), ('W1', (1024, 1024), 'float32', -0.1436767578125, 0.1263427734375), ('b1', (1024,), 'float32', -0.05902099609375, 0.1494140625), ('W2', (1024, 1), 'float32', -0.0362548828125, 0.0611572265625), ('b2', (1,), 'float32', -0.03582763671875, -0.03582763671875)]
+marker shape (32, 5, 1024) norm 5353.327 11678.618 mean 1.5203136 std 279.97385
+0 fees_fx disputes [-0.74  0.89 -1.29 -0.63 -1.57] I was charged the wing amount for an item.
+1 fees_fx disputes [-0.73  0.23 -0.58 -0.95 -1.2 ] When I made a cash transfer abroad the wrong exchange rate was applied
+2 fees_fx disputes [-0.14  1.   -1.66 -1.1  -1.44] My card payment had the wrong exchange rate
+3 fees_fx disputes [-1.39 -0.92 -1.94 -1.03 -2.07] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 fees_fx disputes [-1.01  1.26 -1.32 -1.28 -1.72] I withdrew cash and I think the exchange rate is wrong.
+5 fees_fx disputes [-0.84  0.51 -0.99 -0.7  -1.74] When I got cash the exchange rate was wrong
+6 fees_fx disputes [-0.82 -0.05 -1.41 -0.84 -1.74] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 fees_fx disputes [-0.97 -0.74 -2.28 -1.42 -2.24] Why is the exchange rate on my card wrong?
+8 fees_fx disputes [-0.63  0.71 -1.19 -0.71 -1.22] I purchased something overseas and the incorrect exchange rate was applied.
+9 fees_fx disputes [-1.13  0.04 -1.84 -1.33 -2.  ] The exchange rate was incorrect for this item I bought.
+10 fees_fx disputes [-0.34  0.42 -0.75 -0.61 -0.79] The exchange rate for case abroad is applied wrong.
+11 fees_fx cards [-0.76 -0.95 -0.92 -1.31 -1.66] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 fees_fx disputes [-2.43 -0.85 -2.43 -2.6  -2.97] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 fees_fx disputes [-1.37 -0.05 -1.85 -1.05 -1.78] Why was the wrong rate applied when I bought something in a different currency?
+14 fees_fx disputes [-0.95 -0.28 -1.36 -1.16 -1.73] There's an error in regards to the exchange rate for an item I bought.
+15 fees_fx disputes [-0.66 -0.62 -0.66 -0.68 -1.44] what is the correct exchange rate for getting cash
+16 disputes disputes [ 0.9   1.1  -1.64 -2.11 -1.84] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 disputes disputes [-1.49  1.09 -1.14 -1.86 -1.46] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 disputes disputes [ 0.04  0.31 -0.55 -1.59 -0.88] What should I do about a direct debit that I did not set up?
+19 fees_fx fees_fx [-0.47 -1.06 -1.5   2.46 -1.77] is there a foreign currencies charge?
+20 disputes disputes [-3.05 -0.84 -3.18 -3.48 -2.95] Why did I not get my refund yet?
+21 fees_fx fees_fx [-0.74 -0.1  -2.36  3.17 -2.17] I was mistakenly charged a fee for using my card.
+22 fees_fx fees_fx [-1.61 -0.98 -2.58  3.78 -2.49] The ATM charged me an extra fee, Why?
+23 fees_fx fees_fx [-1.99 -0.68 -2.55  3.92 -2.66] My transaction went through but I was charged a fee. Why?
+24 fees_fx fees_fx [-0.38 -1.26  0.26  3.69 -1.77] Will I get charged fees when I add money with an international card?
+25 disputes disputes [-0.76 -0.42 -0.86 -2.12 -1.79] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 disputes disputes [-0.58  0.1  -0.99 -1.55 -1.  ] I don't think I made this transaction on my statement
+27 disputes disputes [-1.15  0.46 -1.82 -0.5  -1.83] There is a strange charge on my debit statement
+28 fees_fx fees_fx [-1.52 -1.39 -2.55  3.6  -2.53] Why do i have an extra fee on my statement?
+29 disputes disputes [-0.15  1.31 -2.08 -2.31 -1.83] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fees_fx fees_fx [-0.88 -1.11 -1.13  3.71 -2.21] What is this extra fee while I was doing a transfer?
+31 disputes disputes [-1.28  0.64 -1.32 -1.84 -1.41] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > manual_edit.py <<'PY'
+\"\"\"Manual semantic directions; no model training or fitted solver.\"\"\"
+from pathlib import Path
+import json, subprocess
+PYTHON='<lab>/.venv/bin/python'
+positive=[
+'My purchase was converted at a terrible exchange rate.',
+'The conversion rate for my cash withdrawal is incorrect.',
+'I paid in euros with my card but the pound conversion is too expensive.',
+'The ATM currency conversion rate does not match the market rate.',
+'Why did you use such a poor foreign exchange rate for my card transaction?',
+'The exchange rate applied to my shopping abroad was wrong.',
+'The rate used to convert dollars for my cash withdrawal seems unfair.',
+'I bought dinner in another currency and the converted amount is wrong.',
+'My card payment used the wrong exchange rate and the amount looks wrong.',
+'My cash withdrawal used the wrong exchange rate and the amount looks wrong.',
+'I was overcharged because the exchange rate on my purchase was bad.',
+'I received less local currency than expected because of a bad conversion rate.',
+'I expected the interbank rate for my overseas card purchase.',
+'The currency conversion on my ATM withdrawal was calculated incorrectly.',
+'The rate for my foreign currency payment is worse than advertised.',
+'I paid for a hotel abroad and the exchange rate was not correct.',
+'I withdrew dollars and the exchange into my home currency looks wrong.',
+'The exchange rate charged when I used my debit card was too high.',
+'Can you explain the exchange rate used when I got cash overseas?',
+'Why was my purchase converted using a different currency rate?',
+'What exchange rate applies when I withdraw money abroad?',
+'What rate do you use for card payments in foreign currency?',
+'Your exchange rate is bad; it should be closer to the interbank rate.',
+'I made a transfer abroad and the exchange rate was wrong.',
+]
+negative=[
+'My purchase was charged twice.',
+'My cash withdrawal amount is incorrect because the machine did not give me all the cash.',
+'I paid in euros with my card but the payment is still pending.',
+'The ATM did not give me my money but debited my account.',
+'Why was my foreign card transaction declined?',
+'I do not recognise the charge for shopping abroad.',
+'I tried to withdraw dollars but no cash came out.',
+'I bought dinner in another currency and was billed twice.',
+'My card payment amount looks wrong because the merchant added an extra item.',
+'My cash withdrawal amount looks wrong; I requested 100 and received only 50.',
+'I was overcharged because the merchant charged the purchase two times.',
+'I received less cash than I requested from the machine.',
+'I need a refund for my overseas card purchase.',
+'My ATM withdrawal is pending and I need the money back.',
+'My foreign currency payment was declined.',
+'I paid for a hotel abroad but the payment was reversed.',
+'I withdrew dollars but do not recognise this other cash withdrawal.',
+'My debit card was stolen while I was on holiday.',
+'Can you explain why my cash withdrawal was rejected overseas?',
+'Why is my purchase still pending?',
+'Can I withdraw money abroad with my virtual card?',
+'What should I do if my card payment is declined in a foreign country?',
+'I want to change my home address after moving abroad.',
+'I made a transfer abroad and the recipient has not received it.',
+]
+controls=[
+'How do I order a replacement card?', 'Where is my new debit card?',
+'I forgot my card PIN.', 'My contactless card does not work.',
+'Can I add my card to Apple Pay?', 'How can I create a disposable card?',
+'I lost my card and need to freeze it.', 'Can I activate my card online?',
+'I cannot sign in because I lost my phone.', 'How do I verify my identity?',
+'I want to close my account.', 'I forgot my passcode.',
+'Can I open an account if I am sixteen?', 'How do I update my email address?',
+'My bank transfer has not arrived.', 'How can I top up my balance?',
+'I sent a payment to the wrong bank account.', 'My top up is pending.',
+'How do I receive my salary?', 'The bank transfer was returned.',
+'How much is the monthly account fee?', 'Which currencies do you support?',
+'Why was I charged a weekend exchange fee?', 'How do I exchange pounds into euros?',
+'My refund has not arrived.', 'I do not recognise this direct debit.',
+'The merchant cancelled my payment.', 'My cash withdrawal shows pending.',
+'The ATM charged me an extra withdrawal fee.', 'Why is there a charge for an international transfer?',
+'I got the wrong amount of cash from the ATM.', 'My card was charged the wrong amount.'
+]
+if __name__=='__main__':
+ msgs=positive+negative+controls
+ Path('authored_messages.json').write_text(json.dumps({'positive':positive,'negative':negative,'controls':controls},indent=2))
+ subprocess.run([PYTHON,'embed.py','authored_M.npz',*msgs],check=True)
+PY
+<lab>/.venv/bin/python manual_edit.py" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 34353ms:
+W1104 11:16:24.399000 46004 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote authored_M.npz 80 messages
+
+codex
+The input scorer misroutes all 16 correction examples. It correctly routes the 16 nearby control examples. I will add a gated logit adjustment and leave the original weights unchanged.
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M']; n=len(positive)
+a=M[:n,3].mean(0); b=M[n:2*n,3].mean(0)
+c=(a+b)/2; d=a-b; d=d-c*(d@c)/(c@c); d=d/np.linalg.norm(d)
+g=M[:,3].mean(0)-M[:,[0,1,2,4]].mean((0,1)); g=g-c*(g@c)/(c@c); g=g/np.linalg.norm(g)
+for name,vec in [('topic',d),('option',g)]:
+ z=M@vec
+ print(name)
+ for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:
+  print(label,'fees',np.round(np.percentile(z[sl,3],[0,10,25,50,75,90,100]),1),'others',np.round(np.percentile(z[sl][:,[0,1,2,4]],[0,10,50,90,100]),1))
+ print('individual fees')
+ for msg,v in zip(positive+negative+controls,z[:,3]):print(round(float(v),1),msg)
+np.savez('directions.npz',d=d,g=g)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+topic
+positive fees [-1737.4  -479.1  -277.7   341.2   840.   2004.4  4572.8] others [-2065.5 -1646.9  -205.1  1717.2  4556.4]
+negative fees [-1913.4 -1780.3 -1662.  -1255.7  -675.2  2526.6  5394.7] others [-2162.2 -1317.7   -65.2  2673.2  4845.6]
+control fees [-2745.6 -2226.3 -1666.2 -1358.6  -812.8  3831.   5564.2] others [-2574.4 -1631.6   145.4  2811.3  5311.8]
+individual fees
+1210.9 My purchase was converted at a terrible exchange rate.
+-238.0 The conversion rate for my cash withdrawal is incorrect.
+401.8 I paid in euros with my card but the pound conversion is too expensive.
+800.9 The ATM currency conversion rate does not match the market rate.
+957.3 Why did you use such a poor foreign exchange rate for my card transaction?
+215.7 The exchange rate applied to my shopping abroad was wrong.
+55.1 The rate used to convert dollars for my cash withdrawal seems unfair.
+-397.0 I bought dinner in another currency and the converted amount is wrong.
+631.3 My card payment used the wrong exchange rate and the amount looks wrong.
+280.7 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+4572.8 I was overcharged because the exchange rate on my purchase was bad.
+-128.8 I received less local currency than expected because of a bad conversion rate.
+2344.5 I expected the interbank rate for my overseas card purchase.
+571.1 The currency conversion on my ATM withdrawal was calculated incorrectly.
+482.5 The rate for my foreign currency payment is worse than advertised.
+1062.2 I paid for a hotel abroad and the exchange rate was not correct.
+-1303.1 I withdrew dollars and the exchange into my home currency looks wrong.
+3161.0 The exchange rate charged when I used my debit card was too high.
+-1737.4 Can you explain the exchange rate used when I got cash overseas?
+-472.6 Why was my purchase converted using a different currency rate?
+-481.8 What exchange rate applies when I withdraw money abroad?
+551.6 What rate do you use for card payments in foreign currency?
+-399.8 Your exchange rate is bad; it should be closer to the interbank rate.
+0.3 I made a transfer abroad and the exchange rate was wrong.
+4989.5 My purchase was charged twice.
+-1770.5 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+-685.6 I paid in euros with my card but the payment is still pending.
+-643.9 The ATM did not give me my money but debited my account.
+-1722.7 Why was my foreign card transaction declined?
+5394.7 I do not recognise the charge for shopping abroad.
+-1226.1 I tried to withdraw dollars but no cash came out.
+3336.5 I bought dinner in another currency and was billed twice.
+-1371.2 My card payment amount looks wrong because the merchant added an extra item.
+-1641.7 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+-335.3 I was overcharged because the merchant charged the purchase two times.
+-1786.4 I received less cash than I requested from the machine.
+-1748.0 I need a refund for my overseas card purchase.
+-1205.4 My ATM withdrawal is pending and I need the money back.
+636.9 My foreign currency payment was declined.
+-1417.8 I paid for a hotel abroad but the payment was reversed.
+-1637.7 I withdrew dollars but do not recognise this other cash withdrawal.
+-1913.4 My debit card was stolen while I was on holiday.
+-1285.4 Can you explain why my cash withdrawal was rejected overseas?
+-1074.5 Why is my purchase still pending?
+-1032.1 Can I withdraw money abroad with my virtual card?
+-903.0 What should I do if my card payment is declined in a foreign country?
+-1313.7 I want to change my home address after moving abroad.
+-1784.5 I made a transfer abroad and the recipient has not received it.
+-1359.6 How do I order a replacement card?
+-1776.5 Where is my new debit card?
+-1347.4 I forgot my card PIN.
+-737.0 My contactless card does not work.
+-1593.6 Can I add my card to Apple Pay?
+-1357.7 How can I create a disposable card?
+-1646.2 I lost my card and need to freeze it.
+-1726.2 Can I activate my card online?
+-1454.2 I cannot sign in because I lost my phone.
+-2449.8 How do I verify my identity?
+-838.0 I want to close my account.
+-1255.8 I forgot my passcode.
+-2745.6 Can I open an account if I am sixteen?
+-1501.6 How do I update my email address?
+-2029.6 My bank transfer has not arrived.
+-2248.1 How can I top up my balance?
+-1192.1 I sent a payment to the wrong bank account.
+-1773.3 My top up is pending.
+-1384.3 How do I receive my salary?
+-1066.6 The bank transfer was returned.
+5051.1 How much is the monthly account fee?
+-1591.5 Which currencies do you support?
+4092.0 Why was I charged a weekend exchange fee?
+-619.8 How do I exchange pounds into euros?
+-2602.0 My refund has not arrived.
+-1460.1 I do not recognise this direct debit.
+-1138.9 The merchant cancelled my payment.
+-1039.0 My cash withdrawal shows pending.
+5390.8 The ATM charged me an extra withdrawal fee.
+5564.2 Why is there a charge for an international transfer?
+-699.6 I got the wrong amount of cash from the ATM.
+1482.2 My card was charged the wrong amount.
+option
+positive fees [-4421.9 -1967.7  -836.6  -346.2   262.6   460.   1694.5] others [-4406.9 -1699.1   186.3  1613.2  2029.1]
+negative fees [-5133.3 -2480.8   654.4  1226.3  1626.9  1746.8  1876.3] others [-4671.7 -2636.5    43.4  1290.5  2120.1]
+control fees [-5320.4 -3606.8   793.8  1334.4  1632.9  2191.3  2702.9] others [-5090.8 -2744.8  -160.2  1593.7  2528.9]
+individual fees
+-1194.2 My purchase was converted at a terrible exchange rate.
+224.1 The conversion rate for my cash withdrawal is incorrect.
+-403.0 I paid in euros with my card but the pound conversion is too expensive.
+-798.0 The ATM currency conversion rate does not match the market rate.
+-952.3 Why did you use such a poor foreign exchange rate for my card transaction?
+-216.5 The exchange rate applied to my shopping abroad was wrong.
+-68.4 The rate used to convert dollars for my cash withdrawal seems unfair.
+379.4 I bought dinner in another currency and the converted amount is wrong.
+-633.3 My card payment used the wrong exchange rate and the amount looks wrong.
+-289.5 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+-4421.9 I was overcharged because the exchange rate on my purchase was bad.
+114.6 I received less local currency than expected because of a bad conversion rate.
+-2299.3 I expected the interbank rate for my overseas card purchase.
+-568.2 The currency conversion on my ATM withdrawal was calculated incorrectly.
+-488.8 The rate for my foreign currency payment is worse than advertised.
+-1048.7 I paid for a hotel abroad and the exchange rate was not correct.
+1274.2 I withdrew dollars and the exchange into my home currency looks wrong.
+-3099.9 The exchange rate charged when I used my debit card was too high.
+1694.5 Can you explain the exchange rate used when I got cash overseas?
+452.1 Why was my purchase converted using a different currency rate?
+463.4 What exchange rate applies when I withdraw money abroad?
+-553.2 What rate do you use for card payments in foreign currency?
+378.1 Your exchange rate is bad; it should be closer to the interbank rate.
+-3.3 I made a transfer abroad and the exchange rate was wrong.
+-4806.4 My purchase was charged twice.
+1738.2 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+664.0 I paid in euros with my card but the payment is still pending.
+625.7 The ATM did not give me my money but debited my account.
+1688.5 Why was my foreign card transaction declined?
+-5133.3 I do not recognise the charge for shopping abroad.
+1196.1 I tried to withdraw dollars but no cash came out.
+-3270.9 I bought dinner in another currency and was billed twice.
+1344.6 My card payment amount looks wrong because the merchant added an extra item.
+1606.3 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+307.3 I was overcharged because the merchant charged the purchase two times.
+1750.5 I received less cash than I requested from the machine.
+1707.3 I need a refund for my overseas card purchase.
+1175.4 My ATM withdrawal is pending and I need the money back.
+-637.3 My foreign currency payment was declined.
+1386.9 I paid for a hotel abroad but the payment was reversed.
+1604.6 I withdrew dollars but do not recognise this other cash withdrawal.
+1876.3 My debit card was stolen while I was on holiday.
+1256.5 Can you explain why my cash withdrawal was rejected overseas?
+1046.8 Why is my purchase still pending?
+1008.9 Can I withdraw money abroad with my virtual card?
+882.7 What should I do if my card payment is declined in a foreign country?
+1287.9 I want to change my home address after moving abroad.
+1751.3 I made a transfer abroad and the recipient has not received it.
+1334.4 How do I order a replacement card?
+1739.9 Where is my new debit card?
+1324.5 I forgot my card PIN.
+721.1 My contactless card does not work.
+1565.8 Can I add my card to Apple Pay?
+1334.3 How can I create a disposable card?
+1610.2 I lost my card and need to freeze it.
+1701.1 Can I activate my card online?
+1421.6 I cannot sign in because I lost my phone.
+2409.7 How do I verify my identity?
+818.0 I want to close my account.
+1231.2 I forgot my passcode.
+2702.9 Can I open an account if I am sixteen?
+1474.0 How do I update my email address?
+1995.9 My bank transfer has not arrived.
+2213.0 How can I top up my balance?
+1166.8 I sent a payment to the wrong bank account.
+1737.8 My top up is pending.
+1356.9 How do I receive my salary?
+1043.6 The bank transfer was returned.
+-4861.6 How much is the monthly account fee?
+1561.5 Which currencies do you support?
+-3844.3 Why was I charged a weekend exchange fee?
+599.5 How do I exchange pounds into euros?
+2560.8 My refund has not arrived.
+1428.7 I do not recognise this direct debit.
+1112.2 The merchant cancelled my payment.
+1013.2 My cash withdrawal shows pending.
+-5162.7 The ATM charged me an extra withdrawal fee.
+-5320.4 Why is there a charge for an international transfer?
+677.4 I got the wrong amount of cash from the ATM.
+-1469.3 My card was charged the wrong amount.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('authored_M.npz')['M']; rms=np.sqrt((M*M).mean((0,1))); inds=np.argsort(rms)[-25:][::-1]
+print('rms quantiles',np.percentile(rms,[0,25,50,75,90,95,99,100])); print([(int(i),round(float(rms[i]),1),round(float(M[...,i].mean()),1),round(float(M[...,i].std()),1)) for i in inds]); print('single',M[0,3,inds]);
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+rms quantiles [   6.63762331  103.97698021  193.58525848  317.41483307  457.59202576
+  563.10459595  797.64693176 1016.02069092]
+[(963, 1016.0, 1003.9, 156.5), (91, 932.9, -912.7, 192.9), (440, 932.3, 917.2, 167.0), (471, 886.2, -864.5, 195.1), (726, 859.9, -845.2, 158.2), (96, 853.8, -846.5, 111.8), (553, 850.0, 829.4, 186.0), (195, 822.7, 813.3, 124.0), (451, 822.7, -813.6, 121.7), (719, 818.0, 807.4, 131.2), (739, 797.8, 788.5, 121.8), (735, 797.1, 783.8, 144.8), (117, 791.1, 784.7, 100.4), (515, 785.2, 761.3, 192.5), (35, 777.1, 757.3, 174.6), (422, 729.0, -719.0, 120.0), (699, 726.4, 717.2, 115.4), (842, 714.5, -708.9, 89.0), (559, 713.1, 705.9, 101.6), (379, 697.7, -692.3, 86.4), (979, 673.9, -655.5, 156.6), (130, 671.7, -654.0, 153.2), (473, 665.9, 652.1, 134.6), (983, 662.3, 653.0, 110.8), (458, 659.4, 654.3, 81.5)]
+single [ 1193.4891  -1121.1882   1084.699   -1067.5005  -1027.4667   -982.84503
+  1026.9266    967.63727  -958.3878    953.5263    939.9624    956.25964
+   908.5387    949.28784   933.0034   -864.63904   846.8102   -818.41583
+   827.1873   -796.28827  -812.2438   -838.6139    797.8054    771.77014
+   747.6385 ]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M']; U=M/np.linalg.norm(M,axis=-1,keepdims=True); n=len(positive)
+a=U[:n,3].mean(0); b=U[n:2*n,3].mean(0); c=(a+b)/2; d=a-b; d-=c*(d@c)/(c@c); d/=np.linalg.norm(d)
+g=U[:,3].mean(0)-U[:,[0,1,2,4]].mean((0,1)); c=U.mean((0,1)); g-=c*(g@c)/(c@c); g/=np.linalg.norm(g)
+for name,vec in [('topic',d),('option',g)]:
+ z=M@vec
+ print(name,'direction dot',d@g)
+ for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:
+  print(label,'fees',np.round(np.percentile(z[sl,3],[0,10,25,50,75,90,100]),1),'others',np.round(np.percentile(z[sl][:,[0,1,2,4]],[0,10,50,90,100]),1))
+ for msg,v in zip(positive+negative+controls,z[:,3]):print(round(float(v),1),msg)
+np.savez('directions.npz',d=d,g=g)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+topic direction dot -0.9942894
+positive fees [-1599.9  -270.9   -59.9   578.   1092.3  2292.1  4953.7] others [-1908.3 -1481.      7.9  1986.1  4937.1]
+negative fees [-1763.  -1618.2 -1499.6 -1074.9  -472.1  2827.2  5810.9] others [-2020.9 -1139.8   147.4  2975.3  5241.3]
+control fees [-2639.8 -2080.3 -1502.1 -1173.2  -610.2  4142.8  5998.1] others [-2460.2 -1471.2   374.2  3131.6  5731.7]
+1474.1 My purchase was converted at a terrible exchange rate.
+-17.6 The conversion rate for my cash withdrawal is incorrect.
+642.9 I paid in euros with my card but the pound conversion is too expensive.
+1052.3 The ATM currency conversion rate does not match the market rate.
+1212.4 Why did you use such a poor foreign exchange rate for my card transaction?
+451.8 The exchange rate applied to my shopping abroad was wrong.
+282.8 The rate used to convert dollars for my cash withdrawal seems unfair.
+-187.1 I bought dinner in another currency and the converted amount is wrong.
+876.4 My card payment used the wrong exchange rate and the amount looks wrong.
+513.0 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+4953.7 I was overcharged because the exchange rate on my purchase was bad.
+90.9 I received less local currency than expected because of a bad conversion rate.
+2642.6 I expected the interbank rate for my overseas card purchase.
+817.0 The currency conversion on my ATM withdrawal was calculated incorrectly.
+723.2 The rate for my foreign currency payment is worse than advertised.
+1324.0 I paid for a hotel abroad and the exchange rate was not correct.
+-1121.1 I withdrew dollars and the exchange into my home currency looks wrong.
+3484.5 The exchange rate charged when I used my debit card was too high.
+-1599.9 Can you explain the exchange rate used when I got cash overseas?
+-264.8 Why was my purchase converted using a different currency rate?
+-273.5 What exchange rate applies when I withdraw money abroad?
+792.2 What rate do you use for card payments in foreign currency?
+-194.3 Your exchange rate is bad; it should be closer to the interbank rate.
+232.1 I made a transfer abroad and the exchange rate was wrong.
+5392.3 My purchase was charged twice.
+-1608.2 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+-483.4 I paid in euros with my card but the payment is still pending.
+-438.2 The ATM did not give me my money but debited my account.
+-1560.9 Why was my foreign card transaction declined?
+5810.9 I do not recognise the charge for shopping abroad.
+-1047.6 I tried to withdraw dollars but no cash came out.
+3660.1 I bought dinner in another currency and was billed twice.
+-1190.2 My card payment amount looks wrong because the merchant added an extra item.
+-1479.2 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+-130.6 I was overcharged because the merchant charged the purchase two times.
+-1626.2 I received less cash than I requested from the machine.
+-1594.1 I need a refund for my overseas card purchase.
+-1024.4 My ATM withdrawal is pending and I need the money back.
+883.6 My foreign currency payment was declined.
+-1241.0 I paid for a hotel abroad but the payment was reversed.
+-1472.1 I withdrew dollars but do not recognise this other cash withdrawal.
+-1763.0 My debit card was stolen while I was on holiday.
+-1102.1 Can you explain why my cash withdrawal was rejected overseas?
+-887.5 Why is my purchase still pending?
+-839.9 Can I withdraw money abroad with my virtual card?
+-704.9 What should I do if my card payment is declined in a foreign country?
+-1130.7 I want to change my home address after moving abroad.
+-1622.5 I made a transfer abroad and the recipient has not received it.
+-1172.9 How do I order a replacement card?
+-1608.7 Where is my new debit card?
+-1163.6 I forgot my card PIN.
+-530.8 My contactless card does not work.
+-1420.1 Can I add my card to Apple Pay?
+-1173.6 How can I create a disposable card?
+-1485.6 I lost my card and need to freeze it.
+-1551.5 Can I activate my card online?
+-1285.5 I cannot sign in because I lost my phone.
+-2316.2 How do I verify my identity?
+-636.7 I want to close my account.
+-1069.3 I forgot my passcode.
+-2639.8 Can I open an account if I am sixteen?
+-1326.0 How do I update my email address?
+-1880.1 My bank transfer has not arrived.
+-2102.5 How can I top up my balance?
+-1005.8 I sent a payment to the wrong bank account.
+-1614.3 My top up is pending.
+-1204.9 How do I receive my salary?
+-873.5 The bank transfer was returned.
+5456.7 How much is the monthly account fee?
+-1418.2 Which currencies do you support?
+4408.7 Why was I charged a weekend exchange fee?
+-414.8 How do I exchange pounds into euros?
+-2495.2 My refund has not arrived.
+-1285.0 I do not recognise this direct debit.
+-953.4 The merchant cancelled my payment.
+-847.6 My cash withdrawal shows pending.
+5812.9 The ATM charged me an extra withdrawal fee.
+5998.1 Why is there a charge for an international transfer?
+-498.2 I got the wrong amount of cash from the ATM.
+1749.7 My card was charged the wrong amount.
+option direction dot -0.9942894
+positive fees [-4607.2 -2039.2  -880.4  -380.8   238.3   439.4  1690.7] others [-4591.  -1761.    161.3  1609.7  2030.7]
+negative fees [-5407.8 -2575.5   636.8  1217.   1623.2  1745.1  1876. ] others [-4872.1 -2727.7    15.1  1282.4  2122.8]
+control fees [-5578.  -3838.6   778.   1326.8  1628.9  2195.1  2712.1] others [-5328.  -2843.6  -191.   1589.6  2534.5]
+-1244.4 My purchase was converted at a terrible exchange rate.
+199.0 The conversion rate for my cash withdrawal is incorrect.
+-438.6 I paid in euros with my card but the pound conversion is too expensive.
+-841.0 The ATM currency conversion rate does not match the market rate.
+-998.6 Why did you use such a poor foreign exchange rate for my card transaction?
+-248.3 The exchange rate applied to my shopping abroad was wrong.
+-99.1 The rate used to convert dollars for my cash withdrawal seems unfair.
+357.7 I bought dinner in another currency and the converted amount is wrong.
+-673.6 My card payment used the wrong exchange rate and the amount looks wrong.
+-323.0 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+-4607.2 I was overcharged because the exchange rate on my purchase was bad.
+88.6 I received less local currency than expected because of a bad conversion rate.
+-2379.8 I expected the interbank rate for my overseas card purchase.
+-606.6 The currency conversion on my ATM withdrawal was calculated incorrectly.
+-526.4 The rate for my foreign currency payment is worse than advertised.
+-1096.4 I paid for a hotel abroad and the exchange rate was not correct.
+1265.5 I withdrew dollars and the exchange into my home currency looks wrong.
+-3209.5 The exchange rate charged when I used my debit card was too high.
+1690.7 Can you explain the exchange rate used when I got cash overseas?
+431.1 Why was my purchase converted using a different currency rate?
+442.9 What exchange rate applies when I withdraw money abroad?
+-591.0 What rate do you use for card payments in foreign currency?
+356.4 Your exchange rate is bad; it should be closer to the interbank rate.
+-31.5 I made a transfer abroad and the exchange rate was wrong.
+-5018.2 My purchase was charged twice.
+1736.5 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+646.6 I paid in euros with my card but the payment is still pending.
+607.7 The ATM did not give me my money but debited my account.
+1686.2 Why was my foreign card transaction declined?
+-5407.8 I do not recognise the charge for shopping abroad.
+1186.6 I tried to withdraw dollars but no cash came out.
+-3389.0 I bought dinner in another currency and was billed twice.
+1337.3 My card payment amount looks wrong because the merchant added an extra item.
+1602.2 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+283.0 I was overcharged because the merchant charged the purchase two times.
+1748.8 I received less cash than I requested from the machine.
+1703.4 I need a refund for my overseas card purchase.
+1165.5 My ATM withdrawal is pending and I need the money back.
+-677.3 My foreign currency payment was declined.
+1380.1 I paid for a hotel abroad but the payment was reversed.
+1600.7 I withdrew dollars but do not recognise this other cash withdrawal.
+1876.0 My debit card was stolen while I was on holiday.
+1247.4 Can you explain why my cash withdrawal was rejected overseas?
+1035.3 Why is my purchase still pending?
+996.8 Can I withdraw money abroad with my virtual card?
+868.8 What should I do if my card payment is declined in a foreign country?
+1280.1 I want to change my home address after moving abroad.
+1749.6 I made a transfer abroad and the recipient has not received it.
+1326.4 How do I order a replacement card?
+1736.4 Where is my new debit card?
+1317.2 I forgot my card PIN.
+704.6 My contactless card does not work.
+1562.2 Can I add my card to Apple Pay?
+1327.2 How can I create a disposable card?
+1605.7 I lost my card and need to freeze it.
+1698.7 Can I activate my card online?
+1415.5 I cannot sign in because I lost my phone.
+2415.4 How do I verify my identity?
+802.5 I want to close my account.
+1222.4 I forgot my passcode.
+2712.1 Can I open an account if I am sixteen?
+1468.6 How do I update my email address?
+1997.6 My bank transfer has not arrived.
+2217.0 How can I top up my balance?
+1156.9 I sent a payment to the wrong bank account.
+1736.0 My top up is pending.
+1349.9 How do I receive my salary?
+1031.7 The bank transfer was returned.
+-5080.0 How much is the monthly account fee?
+1556.7 Which currencies do you support?
+-4095.4 Why was I charged a weekend exchange fee?
+581.2 How do I exchange pounds into euros?
+2568.3 My refund has not arrived.
+1422.7 I do not recognise this direct debit.
+1101.4 The merchant cancelled my payment.
+1000.6 My cash withdrawal shows pending.
+-5410.4 The ATM charged me an extra withdrawal fee.
+-5578.0 Why is there a charge for an international transfer?
+659.8 I got the wrong amount of cash from the ATM.
+-1527.2 My card was charged the wrong amount.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('authored_M.npz')['M'];
+print('mean vector norms',np.linalg.norm(M.mean((0,1))), 'pair diffs',np.linalg.norm(M[:,3]-M[:,1],axis=-1))
+print('first vector coordinates',M[0,:, :8])
+print('first marker means/std',M[0].mean(-1),M[0].std(-1));
+D=M[:,3]-M[:,1]; print('dept diffs mean norm',np.linalg.norm(D.mean(0)),'range',D.min(),D.max())
+print('S dims columns std',np.round(M[:5,3,:10],2))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+mean vector norms 8861.879 pair diffs [ 929.095   2257.2952  1180.5288   511.42465  318.05417 1898.151
+  177.93654 3826.1592  4571.784   3131.4304  4029.7615  2536.4941
+ 1524.5962  1256.0198  1414.7136  1293.5787  6382.8906  3529.7703
+ 1910.5131  2410.405    804.46094 1084.6804  1018.00226 3024.3108
+ 5149.0386  5901.603   4663.405   2802.5283  5565.9097  6953.5938
+ 3900.538   1838.0356  6892.4746  6142.4067  3422.0464  5411.881
+ 3270.373   4788.926   1121.3878  7320.937   6168.7676  4180.5703
+ 5013.216   5942.4526  2878.9072  2932.3704  2746.8987  6443.18
+ 2539.481   2771.1748  3737.8013  3838.6746  1967.271   1216.3563
+ 3881.1335  1207.7113  4422.496   3020.6091  2652.9778  3573.624
+ 3262.8154  2643.5085  4987.057   2445.7056  5078.2227  4291.4077
+ 2389.597   4407.986   6890.829   2060.6897  7421.405    273.77487
+ 4117.1123  6407.8477  5153.445   4312.0503  5711.0034  7334.743
+ 4035.4268  2837.0103 ]
+first vector coordinates [[ 307.20587   152.90714  -278.47583   105.51295  -476.36224    77.99162
+   142.6348     64.17569 ]
+ [ 389.82065   152.20502  -318.64435   114.62841  -549.2396     78.94313
+    70.44956   142.27498 ]
+ [ 264.63507   174.94514  -259.82523   110.42832  -458.91718    80.06465
+   202.04602     6.039299]
+ [ 348.05682   168.34505  -299.07617   121.11822  -527.6312     81.54367
+   124.40547    83.55841 ]
+ [ 245.45401   177.02791  -251.52911   108.50187  -444.2176     79.446655
+   219.92899   -11.297287]]
+first marker means/std [1.6995978 1.3035626 1.9417391 1.6751971 1.9967928] [298.5561  337.85413 289.54672 327.57062 281.60413]
+dept diffs mean norm 2324.899 range -624.06396 612.9668
+S dims columns std [[ 3.4806e+02  1.6835e+02 -2.9908e+02  1.2112e+02 -5.2763e+02  8.1540e+01
+   1.2441e+02  8.3560e+01  2.8526e+02 -6.0500e+00]
+ [ 2.6386e+02  1.6965e+02 -2.6665e+02  1.0741e+02 -4.5795e+02  7.7090e+01
+   2.0792e+02  8.0000e+00  1.9755e+02 -1.3430e+01]
+ [ 3.0444e+02  1.7025e+02 -2.8478e+02  1.1489e+02 -4.9443e+02  8.0080e+01
+   1.7665e+02  3.8540e+01  2.4055e+02 -1.0150e+01]
+ [ 3.2418e+02  1.6067e+02 -2.9489e+02  1.1376e+02 -5.0556e+02  7.7350e+01
+   1.5465e+02  6.4090e+01  2.6157e+02 -2.4100e+00]
+ [ 3.3196e+02  1.5798e+02 -3.0057e+02  1.1106e+02 -5.0937e+02  7.7920e+01
+   1.4394e+02  7.4130e+01  2.6847e+02  4.5000e-01]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M']; n=len(positive); dirs=np.load('directions.npz'); d=dirs['d']; g=dirs['g']
+t=d-g*(d@g);t/=np.linalg.norm(t)
+o=g-d*(d@g);o/=np.linalg.norm(o)
+for name,vec in [('orth topic',t),('orth option',o)]:
+ z=M@vec
+ print(name)
+ for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:
+  print(label,'fees',np.round(np.percentile(z[sl,3],[0,10,25,50,75,90,100]),1),'others',np.round(np.percentile(z[sl][:,[0,1,2,4]],[0,10,50,90,100]),1))
+ print('all option means',z.mean(0),'stds',z.std(0))
+ for msg,v in zip(positive+negative+controls,z[:,3]):print(round(float(v),1),msg)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+orth topic
+positive fees [ 760.4 1510.7 1653.  1899.  2033.1 2478.6 3493. ] others [ 675.9 1098.7 1645.1 2279.7 3488.2]
+negative fees [ 932.9 1058.2 1106.1 1300.7 1490.  2495.9 4066.6] others [ 772.  1120.6 1628.8 2527.  3720.3]
+control fees [ 532.   958.  1132.7 1341.4 1487.2 3056.1 4234.6] others [ 559.9 1060.2 1733.  2761.4 4067.5]
+all option means [1746.7904 2211.9624 1581.0536 1667.2942 1530.849 ] stds [432.10605 557.7545  539.8845  792.4461  514.0253 ]
+2218.8 My purchase was converted at a terrible exchange rate.
+1689.2 The conversion rate for my cash withdrawal is incorrect.
+1937.9 I paid in euros with my card but the pound conversion is too expensive.
+2024.9 The ATM currency conversion rate does not match the market rate.
+2057.6 Why did you use such a poor foreign exchange rate for my card transaction?
+1920.2 The exchange rate applied to my shopping abroad was wrong.
+1726.5 The rate used to convert dollars for my cash withdrawal seems unfair.
+1580.0 I bought dinner in another currency and the converted amount is wrong.
+1935.9 My card payment used the wrong exchange rate and the amount looks wrong.
+1798.5 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+3493.0 I was overcharged because the exchange rate on my purchase was bad.
+1677.4 I received less local currency than expected because of a bad conversion rate.
+2589.9 I expected the interbank rate for my overseas card purchase.
+2003.4 The currency conversion on my ATM withdrawal was calculated incorrectly.
+1872.6 The rate for my foreign currency payment is worse than advertised.
+2191.8 I paid for a hotel abroad and the exchange rate was not correct.
+1285.1 I withdrew dollars and the exchange into my home currency looks wrong.
+2748.4 The exchange rate charged when I used my debit card was too high.
+760.4 Can you explain the exchange rate used when I got cash overseas?
+1535.1 Why was my purchase converted using a different currency rate?
+1563.4 What exchange rate applies when I withdraw money abroad?
+1916.8 What rate do you use for card payments in foreign currency?
+1500.3 Your exchange rate is bad; it should be closer to the interbank rate.
+1881.3 I made a transfer abroad and the exchange rate was wrong.
+3774.3 My purchase was charged twice.
+1109.1 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+1494.1 I paid in euros with my card but the payment is still pending.
+1555.4 The ATM did not give me my money but debited my account.
+1083.8 Why was my foreign card transaction declined?
+4066.6 I do not recognise the charge for shopping abroad.
+1238.6 I tried to withdraw dollars but no cash came out.
+2721.6 I bought dinner in another currency and was billed twice.
+1306.1 My card payment amount looks wrong because the merchant added an extra item.
+1066.6 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+1412.5 I was overcharged because the merchant charged the purchase two times.
+1054.7 I received less cash than I requested from the machine.
+932.9 I need a refund for my overseas card purchase.
+1259.7 My ATM withdrawal is pending and I need the money back.
+1969.2 My foreign currency payment was declined.
+1230.1 I paid for a hotel abroad but the payment was reversed.
+1120.2 I withdrew dollars but do not recognise this other cash withdrawal.
+957.7 My debit card was stolen while I was on holiday.
+1295.3 Can you explain why my cash withdrawal was rejected overseas?
+1330.0 Why is my purchase still pending?
+1417.0 Can I withdraw money abroad with my virtual card?
+1488.7 What should I do if my card payment is declined in a foreign country?
+1331.3 I want to change my home address after moving abroad.
+1097.3 I made a transfer abroad and the recipient has not received it.
+1367.9 How do I order a replacement card?
+1103.1 Where is my new debit card?
+1368.7 I forgot my card PIN.
+1590.9 My contactless card does not work.
+1248.0 Can I add my card to Apple Pay?
+1368.7 How can I create a disposable card?
+1039.7 I lost my card and need to freeze it.
+1288.0 Can I activate my card online?
+1142.5 I cannot sign in because I lost my phone.
+799.7 How do I verify my identity?
+1511.1 I want to close my account.
+1369.7 I forgot my passcode.
+532.0 Can I open an account if I am sixteen?
+1257.7 How do I update my email address?
+993.9 My bank transfer has not arrived.
+954.0 How can I top up my balance?
+1354.2 I sent a payment to the wrong bank account.
+1047.4 My top up is pending.
+1287.0 How do I receive my salary?
+1427.8 The bank transfer was returned.
+3801.9 How much is the monthly account fee?
+1214.5 Which currencies do you support?
+3154.9 Why was I charged a weekend exchange fee?
+1527.8 How do I exchange pounds into euros?
+547.0 My refund has not arrived.
+1213.7 I do not recognise this direct debit.
+1328.6 The merchant cancelled my payment.
+1380.3 My cash withdrawal shows pending.
+4060.7 The ATM charged me an extra withdrawal fee.
+4234.6 Why is there a charge for an international transfer?
+1479.2 I got the wrong amount of cash from the ATM.
+2167.1 My card was charged the wrong amount.
+orth option
+positive fees [ 936.5 1542.5 1660.2 1847.9 1930.3 2246.8 2981.4] others [ 877.6 1257.9 1657.  2078.9 2978.3]
+negative fees [1109.4 1232.6 1282.9 1426.9 1559.1 2206.8 3466.2] others [ 978.7 1246.  1628.1 2251.6 3179.1]
+control fees [ 817.9 1186.8 1285.8 1465.9 1551.1 2629.  3615.2] others [ 827.2 1229.2 1712.2 2400.1 3475.6]
+all option means [1676.3679 2036.4642 1607.6729 1679.3383 1574.9481] stds [314.56525 399.35675 396.04114 577.3213  369.61328]
+2073.4 My purchase was converted at a terrible exchange rate.
+1700.8 The conversion rate for my cash withdrawal is incorrect.
+1880.0 I paid in euros with my card but the pound conversion is too expensive.
+1923.6 The ATM currency conversion rate does not match the market rate.
+1939.3 Why did you use such a poor foreign exchange rate for my card transaction?
+1882.8 The exchange rate applied to my shopping abroad was wrong.
+1706.1 The rate used to convert dollars for my cash withdrawal seems unfair.
+1609.1 I bought dinner in another currency and the converted amount is wrong.
+1853.0 My card payment used the wrong exchange rate and the amount looks wrong.
+1753.7 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+2981.4 I was overcharged because the exchange rate on my purchase was bad.
+1677.3 I received less local currency than expected because of a bad conversion rate.
+2321.2 I expected the interbank rate for my overseas card purchase.
+1927.3 The currency conversion on my ATM withdrawal was calculated incorrectly.
+1805.7 The rate for my foreign currency payment is worse than advertised.
+2062.2 I paid for a hotel abroad and the exchange rate was not correct.
+1412.8 I withdrew dollars and the exchange into my home currency looks wrong.
+2390.2 The exchange rate charged when I used my debit card was too high.
+936.5 Can you explain the exchange rate used when I got cash overseas?
+1572.3 Why was my purchase converted using a different currency rate?
+1601.7 What exchange rate applies when I withdraw money abroad?
+1842.8 What rate do you use for card payments in foreign currency?
+1529.8 Your exchange rate is bad; it should be closer to the interbank rate.
+1867.2 I made a transfer abroad and the exchange rate was wrong.
+3217.3 My purchase was charged twice.
+1288.1 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+1554.5 I paid in euros with my card but the payment is still pending.
+1611.4 The ATM did not give me my money but debited my account.
+1257.6 Why was my foreign card transaction declined?
+3466.2 I do not recognise the charge for shopping abroad.
+1358.2 I tried to withdraw dollars but no cash came out.
+2344.4 I bought dinner in another currency and was billed twice.
+1441.3 My card payment amount looks wrong because the merchant added an extra item.
+1231.5 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+1434.7 I was overcharged because the merchant charged the purchase two times.
+1235.3 I received less cash than I requested from the machine.
+1109.4 I need a refund for my overseas card purchase.
+1376.9 My ATM withdrawal is pending and I need the money back.
+1885.7 My foreign currency payment was declined.
+1370.4 I paid for a hotel abroad but the payment was reversed.
+1284.7 I withdrew dollars but do not recognise this other cash withdrawal.
+1152.5 My debit card was stolen while I was on holiday.
+1421.0 Can you explain why my cash withdrawal was rejected overseas?
+1432.9 Why is my purchase still pending?
+1515.3 Can I withdraw money abroad with my virtual card?
+1572.9 What should I do if my card payment is declined in a foreign country?
+1460.3 I want to change my home address after moving abroad.
+1277.7 I made a transfer abroad and the recipient has not received it.
+1501.6 How do I order a replacement card?
+1282.1 Where is my new debit card?
+1501.5 I forgot my card PIN.
+1657.0 My contactless card does not work.
+1407.6 Can I add my card to Apple Pay?
+1502.5 How can I create a disposable card?
+1205.1 I lost my card and need to freeze it.
+1461.9 Can I activate my card online?
+1287.0 I cannot sign in because I lost my phone.
+1052.8 How do I verify my identity?
+1588.1 I want to close my account.
+1492.4 I forgot my passcode.
+818.4 Can I open an account if I am sixteen?
+1407.3 How do I update my email address?
+1201.4 My bank transfer has not arrived.
+1185.2 How can I top up my balance?
+1469.9 I sent a payment to the wrong bank account.
+1226.7 My top up is pending.
+1423.7 How do I receive my salary?
+1529.8 The bank transfer was returned.
+3238.0 How much is the monthly account fee?
+1373.7 Which currencies do you support?
+2699.8 Why was I charged a weekend exchange fee?
+1581.1 How do I exchange pounds into euros?
+817.9 My refund has not arrived.
+1358.5 I do not recognise this direct debit.
+1438.5 The merchant cancelled my payment.
+1479.2 My cash withdrawal shows pending.
+3460.1 The ATM charged me an extra withdrawal fee.
+3615.2 Why is there a charge for an international transfer?
+1541.2 I got the wrong amount of cash from the ATM.
+1991.8 My card was charged the wrong amount.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M'].astype('float64'); n=len(positive)
+c=M.mean((0,1)); c/=np.linalg.norm(c)
+g=M[:,3].mean(0)-M[:,[0,1,2,4]].mean((0,1));g-=c*(g@c);g/=np.linalg.norm(g)
+d=M[:n,3].mean(0)-M[n:2*n,3].mean(0); d-=c*(d@c); d-=g*(d@g);d/=np.linalg.norm(d)
+print('orth dots',d@c,d@g,g@c)
+z=M@d
+for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:
+ print(label,'fees',np.round(np.percentile(z[sl,3],[0,10,25,50,75,90,100]),1),'others',np.round(np.percentile(z[sl][:,[0,1,2,4]],[0,10,50,90,100]),1))
+for msg,v in zip(positive+negative+controls,z[:,3]):print(round(float(v),1),msg)
+np.savez('directions.npz',d=d,g=g,c=c)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+orth dots 1.7503359872605984e-15 -7.511352650979575e-16 3.226585665316861e-16
+positive fees [-466.5 -206.2 -142.    -9.6   77.1  426.5 1539.2] others [-484.8 -399.2 -131.1  267.8 1526.8]
+negative fees [-448.1 -405.6 -379.7 -312.7 -224.6  532.2 2519.6] others [-490.3 -377.8 -140.9  520.1 1749.3]
+control fees [-522.4 -427.6 -372.  -292.9 -226.4 1723.3 2381.7] others [-536.9 -416.8  -89.7  724.8 2196.1]
+211.8 My purchase was converted at a terrible exchange rate.
+-131.9 The conversion rate for my cash withdrawal is incorrect.
+12.4 I paid in euros with my card but the pound conversion is too expensive.
+70.4 The ATM currency conversion rate does not match the market rate.
+97.1 Why did you use such a poor foreign exchange rate for my card transaction?
+5.8 The exchange rate applied to my shopping abroad was wrong.
+-110.9 The rate used to convert dollars for my cash withdrawal seems unfair.
+-172.2 I bought dinner in another currency and the converted amount is wrong.
+19.1 My card payment used the wrong exchange rate and the amount looks wrong.
+-58.8 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+1539.2 I was overcharged because the exchange rate on my purchase was bad.
+-128.5 I received less local currency than expected because of a bad conversion rate.
+518.5 I expected the interbank rate for my overseas card purchase.
+57.4 The currency conversion on my ATM withdrawal was calculated incorrectly.
+-25.5 The rate for my foreign currency payment is worse than advertised.
+176.5 I paid for a hotel abroad and the exchange rate was not correct.
+-320.7 I withdrew dollars and the exchange into my home currency looks wrong.
+699.1 The exchange rate charged when I used my debit card was too high.
+-466.5 Can you explain the exchange rate used when I got cash overseas?
+-202.2 Why was my purchase converted using a different currency rate?
+-184.1 What exchange rate applies when I withdraw money abroad?
+18.2 What rate do you use for card payments in foreign currency?
+-207.9 Your exchange rate is bad; it should be closer to the interbank rate.
+-25.0 I made a transfer abroad and the exchange rate was wrong.
+1835.5 My purchase was charged twice.
+-377.4 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+-223.3 I paid in euros with my card but the payment is still pending.
+-192.1 The ATM did not give me my money but debited my account.
+-390.8 Why was my foreign card transaction declined?
+2519.6 I do not recognise the charge for shopping abroad.
+-325.8 I tried to withdraw dollars but no cash came out.
+746.1 I bought dinner in another currency and was billed twice.
+-305.6 My card payment amount looks wrong because the merchant added an extra item.
+-396.9 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+-258.4 I was overcharged because the merchant charged the purchase two times.
+-409.3 I received less cash than I requested from the machine.
+-448.1 I need a refund for my overseas card purchase.
+-324.7 My ATM withdrawal is pending and I need the money back.
+33.2 My foreign currency payment was declined.
+-344.3 I paid for a hotel abroad but the payment was reversed.
+-377.0 I withdrew dollars but do not recognise this other cash withdrawal.
+-426.0 My debit card was stolen while I was on holiday.
+-319.8 Can you explain why my cash withdrawal was rejected overseas?
+-298.4 Why is my purchase still pending?
+-256.8 Can I withdraw money abroad with my virtual card?
+-225.1 What should I do if my card payment is declined in a foreign country?
+-295.4 I want to change my home address after moving abroad.
+-386.5 I made a transfer abroad and the recipient has not received it.
+-292.5 How do I order a replacement card?
+-414.0 Where is my new debit card?
+-273.0 I forgot my card PIN.
+-177.3 My contactless card does not work.
+-329.0 Can I add my card to Apple Pay?
+-277.3 How can I create a disposable card?
+-402.2 I lost my card and need to freeze it.
+-313.7 Can I activate my card online?
+-362.0 I cannot sign in because I lost my phone.
+-483.4 How do I verify my identity?
+-218.6 I want to close my account.
+-282.6 I forgot my passcode.
+-522.4 Can I open an account if I am sixteen?
+-322.0 How do I update my email address?
+-404.9 My bank transfer has not arrived.
+-429.1 How can I top up my balance?
+-284.6 I sent a payment to the wrong bank account.
+-405.3 My top up is pending.
+-313.3 How do I receive my salary?
+-258.1 The bank transfer was returned.
+1893.1 How much is the monthly account fee?
+-347.6 Which currencies do you support?
+2325.7 Why was I charged a weekend exchange fee?
+-208.8 How do I exchange pounds into euros?
+-502.1 My refund has not arrived.
+-351.9 I do not recognise this direct debit.
+-293.3 The merchant cancelled my payment.
+-279.9 My cash withdrawal shows pending.
+2238.7 The ATM charged me an extra withdrawal fee.
+2381.7 Why is there a charge for an international transfer?
+-229.0 I got the wrong amount of cash from the ATM.
+194.4 My card was charged the wrong amount.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M'].astype('float64'); n=len(positive)
+# Remove the common offset and within-message option variation of two authored controls.
+qs=[]
+for v in [M.mean((0,1))]+[M[i,j]-M[i,4] for i in [48,72] for j in range(4)]:
+ v=v.copy()
+ for q in qs:v-=q*(v@q)
+ if np.linalg.norm(v)>1e-8:qs.append(v/np.linalg.norm(v))
+def project(v):
+ for q in qs:v=v-q*(v@q)
+ return v
+D=project(M[:n].mean((0,1))-M[n:2*n].mean((0,1)));D/=np.linalg.norm(D)
+z=M@D
+print('residual norms',np.linalg.norm(project(M),axis=-1).min(),np.linalg.norm(project(M),axis=-1).max())
+for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:
+ print(label,'fees',np.round(np.percentile(z[sl,3],[0,10,25,50,75,90,100]),1),'others',np.round(np.percentile(z[sl][:,[0,1,2,4]],[0,10,50,90,100]),1))
+for msg,v in zip(positive+negative+controls,z[:,3]):print(round(float(v),1),msg)
+np.savez('directions.npz',d=D,Q=np.array(qs))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ exited 1 in 0ms:
+Traceback (most recent call last):
+  File "<stdin>", line 15, in <module>
+  File "<stdin>", line 11, in project
+ValueError: operands could not be broadcast together with shapes (1024,) (80,5) 
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M'].astype('float64'); n=len(positive)
+qs=[]
+for v in [M.mean((0,1))]+[M[i,j]-M[i,4] for i in [48,72] for j in range(4)]:
+ v=v.copy()
+ for q in qs:v-=q*(v@q)
+ if np.linalg.norm(v)>1e-8:qs.append(v/np.linalg.norm(v))
+def project(v):
+ for q in qs:v=v-q*np.expand_dims(v@q,-1)
+ return v
+D=project(M[:n].mean((0,1))-M[n:2*n].mean((0,1)));D/=np.linalg.norm(D)
+z=M@D
+print('residual norms',np.linalg.norm(project(M),axis=-1).min(),np.linalg.norm(project(M),axis=-1).max())
+for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:
+ print(label,'fees',np.round(np.percentile(z[sl,3],[0,10,25,50,75,90,100]),1),'others',np.round(np.percentile(z[sl][:,[0,1,2,4]],[0,10,50,90,100]),1))
+for msg,v in zip(positive+negative+controls,z[:,3]):print(round(float(v),1),msg)
+np.savez('directions.npz',d=D,Q=np.array(qs))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+residual norms 22.979427457269008 1295.4333728530123
+positive fees [-198.9   -5.5    4.9   14.8   25.8   40.8   52.4] others [-197.4    0.7   18.4   44.4   67.3]
+negative fees [-568.4  -41.1   -2.7    5.9   13.3   18.1   20.2] others [-226.1  -12.6    9.4   31.7   39. ]
+control fees [-706.  -269.     3.     7.9   18.7   27.2   43.8] others [-700.6  -18.1   11.6   36.8   59.9]
+52.4 My purchase was converted at a terrible exchange rate.
+8.1 The conversion rate for my cash withdrawal is incorrect.
+15.8 I paid in euros with my card but the pound conversion is too expensive.
+20.1 The ATM currency conversion rate does not match the market rate.
+10.7 Why did you use such a poor foreign exchange rate for my card transaction?
+38.0 The exchange rate applied to my shopping abroad was wrong.
+-6.3 The rate used to convert dollars for my cash withdrawal seems unfair.
+17.5 I bought dinner in another currency and the converted amount is wrong.
+6.1 My card payment used the wrong exchange rate and the amount looks wrong.
+10.8 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+-198.9 I was overcharged because the exchange rate on my purchase was bad.
+16.9 I received less local currency than expected because of a bad conversion rate.
+44.4 I expected the interbank rate for my overseas card purchase.
+37.0 The currency conversion on my ATM withdrawal was calculated incorrectly.
+-0.2 The rate for my foreign currency payment is worse than advertised.
+41.9 I paid for a hotel abroad and the exchange rate was not correct.
+1.3 I withdrew dollars and the exchange into my home currency looks wrong.
+-16.7 The exchange rate charged when I used my debit card was too high.
+-3.9 Can you explain the exchange rate used when I got cash overseas?
+7.8 Why was my purchase converted using a different currency rate?
+15.6 What exchange rate applies when I withdraw money abroad?
+24.7 What rate do you use for card payments in foreign currency?
+14.0 Your exchange rate is bad; it should be closer to the interbank rate.
+28.8 I made a transfer abroad and the exchange rate was wrong.
+-279.7 My purchase was charged twice.
+20.2 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+6.0 I paid in euros with my card but the payment is still pending.
+18.8 The ATM did not give me my money but debited my account.
+5.9 Why was my foreign card transaction declined?
+-568.4 I do not recognise the charge for shopping abroad.
+-2.4 I tried to withdraw dollars but no cash came out.
+-52.3 I bought dinner in another currency and was billed twice.
+15.6 My card payment amount looks wrong because the merchant added an extra item.
+1.5 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+-14.8 I was overcharged because the merchant charged the purchase two times.
+5.2 I received less cash than I requested from the machine.
+-15.1 I need a refund for my overseas card purchase.
+-3.7 My ATM withdrawal is pending and I need the money back.
+11.3 My foreign currency payment was declined.
+10.9 I paid for a hotel abroad but the payment was reversed.
+3.4 I withdrew dollars but do not recognise this other cash withdrawal.
+7.1 My debit card was stolen while I was on holiday.
+0.9 Can you explain why my cash withdrawal was rejected overseas?
+8.7 Why is my purchase still pending?
+12.7 Can I withdraw money abroad with my virtual card?
+18.8 What should I do if my card payment is declined in a foreign country?
+16.5 I want to change my home address after moving abroad.
+15.1 I made a transfer abroad and the recipient has not received it.
+11.1 How do I order a replacement card?
+-8.8 Where is my new debit card?
+32.2 I forgot my card PIN.
+23.3 My contactless card does not work.
+27.4 Can I add my card to Apple Pay?
+28.0 How can I create a disposable card?
+2.4 I lost my card and need to freeze it.
+43.8 Can I activate my card online?
+3.2 I cannot sign in because I lost my phone.
+11.0 How do I verify my identity?
+8.1 I want to close my account.
+17.9 I forgot my passcode.
+-15.0 Can I open an account if I am sixteen?
+21.1 How do I update my email address?
+24.9 My bank transfer has not arrived.
+25.6 How can I top up my balance?
+17.5 I sent a payment to the wrong bank account.
+6.7 My top up is pending.
+16.2 How do I receive my salary?
+7.7 The bank transfer was returned.
+-297.2 How much is the monthly account fee?
+4.9 Which currencies do you support?
+-706.0 Why was I charged a weekend exchange fee?
+9.6 How do I exchange pounds into euros?
+-4.2 My refund has not arrived.
+7.6 I do not recognise this direct debit.
+6.3 The merchant cancelled my payment.
+6.2 My cash withdrawal shows pending.
+-412.3 The ATM charged me an extra withdrawal fee.
+-440.7 Why is there a charge for an international transfer?
+5.6 I got the wrong amount of cash from the ATM.
+9.4 My card was charged the wrong amount.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M'].astype('float64');n=len(positive)
+c=M.mean((0,1));c/=np.linalg.norm(c)
+g=M[:,3].mean(0)-M[:,[0,1,2,4]].mean((0,1));g-=c*(g@c);g/=np.linalg.norm(g)
+d=M[:n].mean((0,1))-M[n:2*n].mean((0,1)); d-=c*(d@c); d-=g*(d@g);d/=np.linalg.norm(d)
+z=M@d
+for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:print(label,np.round(z[sl,3],1))
+# Difference vectors for selected pure option contrasts; inspect cosine relationships.
+ix=[0,2,10,24,29,48,56,62,68,70,72]
+D=np.array([M[i,3]-M[i,1] for i in ix]);D/=np.linalg.norm(D,axis=-1,keepdims=True)
+print('cosines',ix);print(np.round(D@D.T,3))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+positive [   -5.2   281.3   173.5    45.6   -10.5   257.8   171.    306.3    61.2
+   146.9 -2294.3   256.6  -493.3   146.9    87.2    34.9   441.7 -1068.4
+   275.1   296.2   323.3   115.1   264.3   317.1]
+negative [-2714.2   512.1   354.7   377.8   480.  -3841.8   400.1 -1264.6   489.5
+   430.    150.7   477.3   362.6   400.2    85.    456.9   465.3   457.
+   438.7   406.    439.    435.5   492.    504.1]
+control [  505.8   458.8   529.    431.1   543.7   530.5   408.6   598.    427.
+   506.5   410.8   490.9   430.3   509.1   529.4   554.9   457.    473.1
+   486.8   449.  -2834.8   495.  -3737.8   353.9   406.3   463.7   421.7
+   405.5 -3315.2 -3436.3   342.1  -218.6]
+cosines [0, 2, 10, 24, 29, 48, 56, 62, 68, 70, 72]
+[[ 1.     0.979 -0.958 -0.971 -0.859  0.83   0.879  0.817 -0.991 -0.674
+   0.744]
+ [ 0.979  1.    -0.886 -0.914 -0.74   0.924  0.955  0.914 -0.962 -0.514
+   0.861]
+ [-0.958 -0.886  1.     0.996  0.964 -0.666 -0.732 -0.65   0.976  0.835
+  -0.558]
+ [-0.971 -0.914  0.996  1.     0.941 -0.722 -0.782 -0.707  0.989  0.791
+  -0.62 ]
+ [-0.859 -0.74   0.964  0.941  1.    -0.451 -0.531 -0.431  0.885  0.95
+  -0.327]
+ [ 0.83   0.924 -0.666 -0.722 -0.451  1.     0.995  1.    -0.813 -0.166
+   0.987]
+ [ 0.879  0.955 -0.732 -0.782 -0.531  0.995  1.     0.993 -0.863 -0.254
+   0.971]
+ [ 0.817  0.914 -0.65  -0.707 -0.431  1.     0.993  1.    -0.8   -0.142
+   0.991]
+ [-0.991 -0.962  0.976  0.989  0.885 -0.813 -0.863 -0.8    1.     0.702
+  -0.725]
+ [-0.674 -0.514  0.835  0.791  0.95  -0.166 -0.254 -0.142  0.702  1.
+  -0.03 ]
+ [ 0.744  0.861 -0.558 -0.62  -0.327  0.987  0.971  0.991 -0.725 -0.03
+   1.   ]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M'].astype('float64'); n=len(positive)
+Q=[]
+for v in [M[48,3]-M[48,1],M[0,3]-M[0,1]]:
+ for q in Q:v=v-q*(v@q)
+ Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+D=rem(M[:n].mean((0,1))-M[n:2*n].mean((0,1)));D/=np.linalg.norm(D)
+z=M@D
+for label,sl in [('positive',slice(0,n)),('negative',slice(n,2*n)),('control',slice(2*n,None))]:print(label,np.round(z[sl,3],1))
+print('residual norms',np.percentile(np.linalg.norm(rem(M),axis=-1),[0,10,50,90,100]))
+print('direction common dot',np.dot(D,M.mean((0,1))))
+np.savez('directions.npz',d=D,Q=np.array(Q))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+positive [ -937.9 -1029.2 -1010.  -1020.7 -1025.   -960.4 -1061.6  -988.7 -1036.
+ -1021.6 -1290.3 -1006.   -963.3  -974.9 -1052.7  -965.7 -1021.8 -1138.2
+  -959.3 -1018.1  -996.5  -982.5  -997.7  -977.1]
+negative [-1390.4  -966.2 -1011.6  -991.9  -989.2 -1518.4 -1000.  -1151.9  -987.9
+ -1002.7 -1056.2 -1003.  -1030.7 -1017.  -1030.2 -1007.4  -998.4  -979.1
+ -1028.2 -1003.7  -994.6  -988.4  -983.6  -978.1]
+control [-1020.  -1074.7  -953.4  -984.2  -970.   -971.3  -993.5  -954.9  -989.
+  -994.4 -1013.9  -993.2  -959.6  -972.3  -940.6  -961.6  -987.8  -992.4
+  -983.8 -1012.5 -1413.8 -1009.6 -1248.9 -1008.   -932.7 -1015.4  -997.4
+ -1020.6 -1487.4 -1515.4 -1012.9 -1032.3]
+residual norms [2138.30465472 2309.36154121 2392.09054442 2466.81874714 3328.42280578]
+direction common dot -1015.3399901979506
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+from manual_edit import positive,negative,controls
+M=np.load('authored_M.npz')['M'];z=scorer.logits(scorer.load('scorer_in.npz'),M)
+for i,msg in enumerate(positive+negative+controls):print(i,scorer.DEPTS[z[i].argmax()],round(float(z[i,3]-z[i,1]),2),msg)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 646ms:
+0 disputes -0.48 My purchase was converted at a terrible exchange rate.
+1 disputes -1.05 The conversion rate for my cash withdrawal is incorrect.
+2 disputes -0.59 I paid in euros with my card but the pound conversion is too expensive.
+3 cards -0.24 The ATM currency conversion rate does not match the market rate.
+4 cards -0.17 Why did you use such a poor foreign exchange rate for my card transaction?
+5 disputes -0.95 The exchange rate applied to my shopping abroad was wrong.
+6 disputes -0.0 The rate used to convert dollars for my cash withdrawal seems unfair.
+7 disputes -1.89 I bought dinner in another currency and the converted amount is wrong.
+8 disputes -2.46 My card payment used the wrong exchange rate and the amount looks wrong.
+9 disputes -1.59 My cash withdrawal used the wrong exchange rate and the amount looks wrong.
+10 fees_fx 2.17 I was overcharged because the exchange rate on my purchase was bad.
+11 disputes -1.25 I received less local currency than expected because of a bad conversion rate.
+12 fees_fx 0.72 I expected the interbank rate for my overseas card purchase.
+13 disputes -0.63 The currency conversion on my ATM withdrawal was calculated incorrectly.
+14 fees_fx 0.57 The rate for my foreign currency payment is worse than advertised.
+15 disputes -0.66 I paid for a hotel abroad and the exchange rate was not correct.
+16 disputes -3.48 I withdrew dollars and the exchange into my home currency looks wrong.
+17 fees_fx 1.72 The exchange rate charged when I used my debit card was too high.
+18 disputes -0.89 Can you explain the exchange rate used when I got cash overseas?
+19 disputes -1.17 Why was my purchase converted using a different currency rate?
+20 cards -0.43 What exchange rate applies when I withdraw money abroad?
+21 cards 0.43 What rate do you use for card payments in foreign currency?
+22 disputes -0.47 Your exchange rate is bad; it should be closer to the interbank rate.
+23 disputes -1.48 I made a transfer abroad and the exchange rate was wrong.
+24 fees_fx 2.75 My purchase was charged twice.
+25 disputes -2.83 My cash withdrawal amount is incorrect because the machine did not give me all the cash.
+26 disputes -2.33 I paid in euros with my card but the payment is still pending.
+27 disputes -1.32 The ATM did not give me my money but debited my account.
+28 disputes -2.65 Why was my foreign card transaction declined?
+29 fees_fx 4.32 I do not recognise the charge for shopping abroad.
+30 disputes -1.72 I tried to withdraw dollars but no cash came out.
+31 fees_fx 0.98 I bought dinner in another currency and was billed twice.
+32 disputes -3.67 My card payment amount looks wrong because the merchant added an extra item.
+33 disputes -3.13 My cash withdrawal amount looks wrong; I requested 100 and received only 50.
+34 disputes -1.77 I was overcharged because the merchant charged the purchase two times.
+35 disputes -2.45 I received less cash than I requested from the machine.
+36 disputes -1.66 I need a refund for my overseas card purchase.
+37 disputes -2.39 My ATM withdrawal is pending and I need the money back.
+38 disputes -0.57 My foreign currency payment was declined.
+39 disputes -3.92 I paid for a hotel abroad but the payment was reversed.
+40 disputes -3.03 I withdrew dollars but do not recognise this other cash withdrawal.
+41 cards -1.89 My debit card was stolen while I was on holiday.
+42 disputes -2.38 Can you explain why my cash withdrawal was rejected overseas?
+43 disputes -3.21 Why is my purchase still pending?
+44 transfers_topups -1.28 Can I withdraw money abroad with my virtual card?
+45 cards -1.28 What should I do if my card payment is declined in a foreign country?
+46 cards -1.24 I want to change my home address after moving abroad.
+47 disputes -3.07 I made a transfer abroad and the recipient has not received it.
+48 cards -1.09 How do I order a replacement card?
+49 cards -1.27 Where is my new debit card?
+50 account_security -1.61 I forgot my card PIN.
+51 disputes -1.8 My contactless card does not work.
+52 cards -0.83 Can I add my card to Apple Pay?
+53 cards -0.56 How can I create a disposable card?
+54 account_security -1.79 I lost my card and need to freeze it.
+55 cards -0.51 Can I activate my card online?
+56 account_security -2.07 I cannot sign in because I lost my phone.
+57 account_security -1.48 How do I verify my identity?
+58 account_security -1.13 I want to close my account.
+59 account_security -1.59 I forgot my passcode.
+60 cards -1.9 Can I open an account if I am sixteen?
+61 cards -1.15 How do I update my email address?
+62 transfers_topups -2.22 My bank transfer has not arrived.
+63 transfers_topups -1.11 How can I top up my balance?
+64 disputes -2.4 I sent a payment to the wrong bank account.
+65 transfers_topups -1.91 My top up is pending.
+66 transfers_topups -1.1 How do I receive my salary?
+67 transfers_topups -1.99 The bank transfer was returned.
+68 fees_fx 3.8 How much is the monthly account fee?
+69 cards -0.98 Which currencies do you support?
+70 fees_fx 6.09 Why was I charged a weekend exchange fee?
+71 cards 0.07 How do I exchange pounds into euros?
+72 disputes -2.46 My refund has not arrived.
+73 disputes -3.5 I do not recognise this direct debit.
+74 disputes -2.49 The merchant cancelled my payment.
+75 disputes -2.05 My cash withdrawal shows pending.
+76 fees_fx 3.16 The ATM charged me an extra withdrawal fee.
+77 fees_fx 4.1 Why is there a charge for an international transfer?
+78 disputes -1.92 I got the wrong amount of cash from the ATM.
+79 disputes -1.56 My card was charged the wrong amount.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The raw vectors contain large changes that are unrelated to the correction. I will use matched message pairs to isolate the exchange-rate signal and reduce changes to other routes.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > matched_probes.py <<'PY'
+import json,subprocess
+from pathlib import Path
+from manual_edit import PYTHON
+frames=[
+'My card payment has the wrong {}.',
+'My cash withdrawal has the wrong {}.',
+'The {} on my purchase is incorrect.',
+'The {} on my ATM transaction is incorrect.',
+'I think the {} applied to my card purchase is wrong.',
+'I think the {} applied to my cash withdrawal is wrong.',
+'Why is the {} wrong when I pay abroad?',
+'Why is the {} wrong when I get cash abroad?',
+'I am unhappy with the {} on my foreign purchase.',
+'There is a problem with the {} on my withdrawal.',
+'The {} for my recent card payment does not look right.',
+'The {} for my recent ATM withdrawal does not look right.',
+'Can you check the {} for this transaction?',
+'Please explain the incorrect {} on my payment.',
+'I want to complain about the {} on my card purchase.',
+'I want to complain about the {} on my cash withdrawal.',
+]
+p=[s.format('exchange rate') for s in frames]
+n=[s.format('amount') for s in frames]
+msgs=p+n+['Hello.','I need help with my account.','Thank you.']
+Path('matched_messages.json').write_text(json.dumps(msgs,indent=2))
+subprocess.run([PYTHON,'embed.py','matched_M.npz',*msgs],check=True)
+PY
+<lab>/.venv/bin/python matched_probes.py" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 25495ms:
+W1104 11:20:14.413000 57295 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote matched_M.npz 35 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64')
+c=M[:32].mean((0,1));d=M[:16].mean((0,1))-M[16:32].mean((0,1));d/=np.linalg.norm(d)
+print('direction mean dot',d@c)
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ z=N@d;print(name,'fees',np.round(z[:,3],1)); print('dept means',np.round(z.mean(0),1))
+print('Hello diffs norms',np.linalg.norm(M[32]-M[32,4],axis=-1)); print('Hello norm',np.linalg.norm(M[32],axis=-1))
+np.savez('matched_directions.npz',d=d,c=c)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+direction mean dot -3245.7484109995153
+matched pos fees [-3771.9 -3483.4 -2221.3 -3501.4 -5283.8 -3069.5 -3572.4 -1935.2 -4064.1
+ -3597.2 -5194.3 -3017.6 -3797.2 -2764.  -5841.5 -3690. ]
+dept means [-3088.  -4405.6 -1951.7 -3675.3 -1487.7]
+matched neg fees [-1373.2 -1563.1 -1885.  -2180.9 -3228.  -1005.5 -3213.4  -920.8 -4505.8
+  -913.3 -1610.1 -1149.8 -2611.  -1265.7 -5332.7 -3418.6]
+dept means [-3478.1 -7208.7 -2373.5 -2261.1 -2527.8]
+auth pos fees [-4727.9 -2977.  -3784.8 -4227.4 -4392.3 -3583.7 -3289.5 -2700.2 -3994.9
+ -3544.4 -8350.4 -3053.6 -6008.9 -3987.3 -3813.2 -4593.5 -1570.2 -6838.9
+  -493.3 -2600.2 -2609.2 -3882.7 -2618.4 -3359.8]
+dept means [-3461.  -4914.1 -2294.8 -3791.7 -1876.3]
+auth neg fees [-8838.6  -915.6 -2359.6 -2454.   -938.9 -8860.5 -1572.2 -6914.  -1517.1
+  -997.3 -2614.7  -859.7  -751.7 -1626.6 -4033.2 -1405.5 -1060.4  -601.5
+ -1603.8 -1828.2 -1950.6 -2145.8 -1597.1  -897. ]
+dept means [-3304.4 -5806.8 -2405.9 -2431.  -2301.6]
+auth control fees [-1614.2  -963.1 -1593.7 -2402.8 -1242.6 -1590.9  -957.  -1162.1 -1248.4
+    84.9 -2237.  -1698.5   760.2 -1336.5  -516.2  -282.  -1736.   -852.
+ -1483.3 -1940.3 -8876.3 -1219.2 -6335.1 -2456.3   634.3 -1349.2 -1757.1
+ -1920.3 -9190.6 -9453.7 -2332.3 -4941.7]
+dept means [-4036.7 -4209.  -3148.9 -2287.8 -3012.4]
+Hello diffs norms [ 908.36076268  185.48422895 1227.56599984 2877.81806345    0.        ]
+Hello norm [ 9856.24092973 10666.34572833  9926.86412869  8965.89500936
+ 10706.47687356]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64')
+ids=[[48,49,52,53],[72,73,74,75],[62,63,65,66],[68,70,76,77],[56,57,58,59]]
+R=np.mean([A[i,k]-A[i,[j for j in range(5) if j"'!=k]].mean(0) for k,ix in enumerate(ids) for i in ix],axis=0)
+C=A.mean((0,1));C/=np.linalg.norm(C);R-=C*(R@C);R/=np.linalg.norm(R)
+D=M[:16].mean((0,1))-M[16:32].mean((0,1));D-=C*(D@C);D-=R*(D@R);D/=np.linalg.norm(D)
+print('"'norm unproj contrast',np.linalg.norm(M[:16].mean((0,1))-M[16:32].mean((0,1))))
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ z=N@D;print(name,'fees',np.round(z[:,3],1)); print('dept means',np.round(z.mean(0),1))
+np.savez('matched_directions.npz',d=D,C=C,R=R)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+norm unproj contrast 648.1755977734163
+matched pos fees [ -28.1  -25.1   73.1  145.6  -81.7   57.  -124.8    7.4  -58.1    9.5
+   22.9  103.8  -86.3   -1.5  -97.2   44.1]
+dept means [34.5 -9.5  8.9 -2.5  3.8]
+matched neg fees [ -81.5  -29.9  -54.2  -95.8  -60.5  -33.2  -74.1  -35.5  -75.4  -26.1
+  -69.3   32.7  -39.5  -32.3 -118.7  -25.5]
+dept means [  7.9 -66.8 -43.6 -51.2 -43.2]
+auth pos fees [-118.3  -21.1  -61.8  -29.5   -5.3 -115.9   61.3  -34.4    0.5   -1.4
+  -24.9  -24.6 -106.7  -88.4   39.1  -89.7    2.7  112.2  201.1    7.9
+  -23.5  -44.6   17.5 -122.1]
+dept means [ 26.4  -7.6 -18.3 -19.6 -25.4]
+auth neg fees [-37.9 -43.6 -17.4 -54.8  -8.2   3.3   7.3 115.5 -63.7  40.5 152.9   6.9
+ 145.6  16.3 -21.7 -17.1  -1.8  11.7   0.6  -9.7 -58.  -79.3 -70.9 -27.5]
+dept means [63.2  9.6  5.8 -0.5  5.8]
+auth control fees [ -63.2   76.3 -120.3 -114.8  -94.8 -118.5   46.8 -136.1    7.8   67.
+  -53.8  -81.3  109.8  -70.   -46.5  -44.8  -63.4    4.3  -59.3  -66.7
+   -8.7  -25.3  136.1  -24.9  124.1  -17.7  -26.3  -11.5  -64.4 -104.2
+  -26.4   17.7]
+dept means [ 37.3  -9.6 -19.4 -26.7 -11.3]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64')
+Q=[]
+for v in [M[32,3]-M[34,3],M[32,3]-M[33,3],A[48,3]-A[62,3],A[57,3]-A[58,3]]:
+ for q in Q:v=v-q*(v@q)
+ print('nuisance norm',np.linalg.norm(v)); Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+D=rem(M[:16].mean((0,1))-M[16:32].mean((0,1))); print('d norm',np.linalg.norm(D));D/=np.linalg.norm(D)
+G=rem(A[:,3].mean(0)-A[:,[0,1,2,4]].mean((0,1)));print('g norm',np.linalg.norm(G));G/=np.linalg.norm(G)
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ z=N@D;print(name,'topic fees',np.round(z[:,3],1)); print('option means',np.round((N@G).mean(0),1),'option minmax',np.round((N@G).min(0),1),np.round((N@G).max(0),1))
+np.savez('matched_directions.npz',d=D,g=G,Q=np.array(Q))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+nuisance norm 441.8909051528852
+nuisance norm 147.92068495421987
+nuisance norm 210.37860804638973
+nuisance norm 164.10065997457835
+d norm 127.88673385053207
+g norm 98.18498635830446
+matched pos topic fees [-367.7 -365.6 -357.2 -381.9 -452.3 -361.9 -354.9 -352.7 -377.9 -363.9
+ -434.7 -366.4 -360.7 -356.  -522.6 -367. ]
+option means [542.  557.9 557.3 550.5 567.9] option minmax [505.8 520.9 519.6 526.6 534.3] [557.  648.4 582.  650.  586.6]
+matched neg topic fees [-356.4 -355.  -356.6 -356.7 -361.2 -355.1 -359.2 -354.1 -394.5 -357.2
+ -355.6 -360.4 -354.3 -357.7 -454.  -364.9]
+option means [ 547.7 1070.1  559.3  569.8  557.3] option minmax [517.9 557.4 532.6 542.8 529.5] [ 623.4 1935.7  597.3  587.9  580.7]
+auth pos topic fees [ -392.2  -357.2  -365.7  -379.2  -387.2  -356.   -364.3  -355.9  -378.5
+  -366.6 -1540.6  -355.6  -558.5  -366.9  -370.8  -382.9  -352.6  -763.8
+  -343.9  -355.8  -351.   -368.7  -356.9  -354.1]
+option means [532.4 644.6 549.4 592.1 559.9] option minmax [500.  512.2 506.6 524.  527. ] [ 552.8 1469.8  581.5 1482.1  583.7]
+auth neg topic fees [-1810.9  -358.   -355.   -355.2  -355.1 -2626.6  -358.7  -866.5  -354.4
+  -355.3  -363.9  -359.2  -352.   -357.5  -373.5  -355.2  -355.8  -359.9
+  -353.7  -354.1  -352.8  -355.2  -351.2  -358.5]
+option means [537.  747.2 552.9 707.9 553.7] option minmax [510.4 511.2 524.8 525.6 530. ] [ 644.3 1639.9  586.6 2503.1  574.2]
+auth control topic fees [ -354.9  -358.1  -356.9  -352.2  -352.9  -353.3  -356.5  -354.3  -356.3
+  -355.6  -355.6  -353.6  -347.7  -358.4  -354.9  -357.2  -353.6  -353.9
+  -352.6  -357.8 -1892.4  -355.9 -2594.8  -353.3  -335.1  -355.3  -358.9
+  -355.6 -2235.8 -2329.3  -359.1  -438. ]
+option means [595.  618.2 631.  774.  662.1] option minmax [493.2 492.2 532.1 547.2 527.1] [1180.4 1231.6 2025.7 2517.8 2389.9]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=[]
+vs=[M[32,3]-M[34,3],M[32,3]-M[33,3],A[48,3]-A[62,3],A[57,3]-A[58,3]]+[A[i,k]-M[32,k] for k,i in enumerate([48,75,62,68,57])]
+for v in vs:
+ for q in Q:v=v-q*(v@q)
+ print('nuisance norm',np.linalg.norm(v));Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+D=rem(M[:16].mean((0,1))-M[16:32].mean((0,1))); print('d norm',np.linalg.norm(D));D/=np.linalg.norm(D)
+G=rem(A[:,3].mean(0)-A[:,[0,1,2,4]].mean((0,1)));print('g norm',np.linalg.norm(G));G/=np.linalg.norm(G)
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ print(name,'topic fees',np.round((N@D)[:,3],1)); print('option means',np.round((N@G).mean(0),1),'option minmax',np.round((N@G).min(0),1),np.round((N@G).max(0),1))
+np.savez('matched_directions.npz',d=D,g=G,Q=np.array(Q))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 30ms:
+nuisance norm 441.8909051528852
+nuisance norm 147.92068495421987
+nuisance norm 210.37860804638973
+nuisance norm 164.10065997457835
+nuisance norm 231.36709023991213
+nuisance norm 66.17528044572654
+nuisance norm 180.25655806325668
+nuisance norm 222.64215192257848
+nuisance norm 587.3269894446216
+d norm 19.055658626079406
+g norm 38.82367003835093
+matched pos topic fees [-241.  -252.2 -244.3 -214.8 -246.8 -234.  -259.6 -266.5 -242.9 -236.9
+ -194.1 -217.6 -243.3 -253.9 -233.9 -222.7]
+option means [643.  623.  685.8 645.1 703.8] option minmax [561.5 595.7 606.3 586.1 648.5] [685.3 650.1 722.8 685.7 732.4]
+matched neg topic fees [-301.1 -285.2 -285.2 -284.6 -262.8 -302.7 -268.  -300.9 -248.7 -295.1
+ -290.6 -275.9 -270.7 -289.7 -238.5 -255.3]
+option means [634.6 643.4 684.4 693.  682.5] option minmax [563.7 580.8 625.3 599.3 635.4] [687.9 755.6 745.  732.2 717.5]
+auth pos topic fees [-234.7 -256.2 -246.5 -239.3 -222.1 -251.7 -222.  -268.  -239.8 -247.5
+ -292.5 -259.4 -237.3 -248.5 -224.7 -219.2 -264.4 -197.  -209.  -256.9
+ -257.8 -245.2 -256.3 -255.1]
+option means [622.2 615.  672.2 642.7 689.4] option minmax [562.3 573.5 614.4 557.8 615.5] [678.3 684.1 724.2 705.5 727.7]
+auth neg topic fees [-305.7 -295.9 -263.3 -267.5 -286.  -317.2 -269.6 -237.4 -291.1 -269.6
+ -216.5 -288.4 -239.7 -268.8 -239.4 -291.4 -281.2 -291.7 -271.5 -276.6
+ -277.7 -285.7 -287.6 -290. ]
+option means [626.6 616.8 670.4 699.6 676.1] option minmax [573.7 573.8 590.8 603.3 606.4] [713.9 716.9 716.9 762.5 717.1]
+auth control topic fees [-293.1 -270.5 -302.3 -293.3 -306.8 -307.  -272.1 -317.  -275.1 -275.3
+ -275.3 -297.7 -259.1 -293.4 -293.1 -302.6 -290.2 -285.3 -287.3 -291.5
+ -288.8 -277.2 -254.2 -264.1 -249.  -292.2 -278.2 -274.7 -338.  -338.8
+ -280.5 -230.7]
+option means [619.9 634.4 665.3 710.2 668.2] option minmax [566.9 584.8 599.1 605.7 599.6] [678.3 701.4 753.3 777.3 729.2]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');data=np.load('matched_directions.npz');Q=list(data['Q']);d=data['d']
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+G=rem(M[32:,3].mean(0)-M[32:][:,[0,1,2,4]].mean((0,1)));G-=d*(G@d);G/=np.linalg.norm(G)
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ z=N@G;print(name,'means',np.round(z.mean(0),1),'min',np.round(z.min(0),1),'max',np.round(z.max(0),1))
+np.savez('matched_directions.npz',d=d,g=G,Q=np.array(Q))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+matched pos means [549.  528.5 587.7 550.8 603.7] min [480.5 502.2 512.3 501.6 549.6] max [588.7 556.7 618.7 586.  628.7]
+matched neg means [536.4 534.6 581.  587.8 579.9] min [468.  481.  527.5 498.7 545.6] max [587.4 626.3 634.3 623.5 611.5]
+auth pos means [528.3 518.5 573.4 546.3 588.7] min [468.6 475.8 520.3 475.5 520.2] max [578.1 572.1 619.1 607.7 621.2]
+auth neg means [532.7 517.9 571.7 596.2 577.1] min [480.1 480.7 492.5 506.8 507.3] max [605.7 594.6 610.9 642.4 614.3]
+auth control means [524.1 536.7 564.9 603.4 566.7] min [471.7 495.8 496.  508.6 499. ] max [590.1 595.6 628.6 650.  619.7]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q']
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+C=rem(M[:16,3].mean(0))
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ Z=rem(N)-C
+ z=np.linalg.norm(Z,axis=-1);print(name,'L2 by option quantiles',np.round(np.percentile(z,[0,10,50,90,100],axis=0),1))
+ print('fees distances',np.round(z[:,3],1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+matched pos L2 by option quantiles [[33.2 18.8 33.3 14.2 28.7]
+ [44.  20.8 43.2 16.5 54.8]
+ [52.3 39.2 56.1 27.8 71.2]
+ [65.8 52.2 76.9 42.3 91.6]
+ [89.8 55.7 90.4 69.2 96.9]]
+fees distances [14.2 21.8 32.3 34.5 35.7 15.3 28.1 48.8 18.1 17.7 69.2 27.5 23.6 34.4
+ 33.5 22.3]
+matched neg L2 by option quantiles [[ 37.7  49.3  29.3  22.3  23.3]
+ [ 44.6  50.1  30.1  30.7  31.4]
+ [ 49.3  62.6  48.4  75.3  52. ]
+ [ 78.5 120.1  89.5  95.5  71.4]
+ [100.  147.3 114.   97.3  85.4]]
+fees distances [97.3 75.2 75.3 60.2 36.1 95.4 33.  93.  28.5 95.7 76.6 77.7 50.6 89.
+ 54.1 22.3]
+auth pos L2 by option quantiles [[32.5 23.  26.1 16.3 33.5]
+ [38.8 29.8 29.  18.6 37.6]
+ [47.6 51.9 43.3 31.5 62.5]
+ [87.6 79.  81.8 65.9 87.6]
+ [95.8 80.4 89.6 97.7 95.1]]
+fees distances [51.4 31.6 17.6 29.7 34.8 21.3 20.8 38.5 16.9 16.3 63.7 28.6 65.2 25.4
+ 24.7 53.1 66.2 97.7 69.7 33.2 37.6 22.  31.5 24.7]
+auth neg L2 by option quantiles [[ 33.8  28.5  22.1  22.3  24.8]
+ [ 37.3  31.2  27.6  44.9  27.4]
+ [ 43.3  55.9  48.3  72.8  45.6]
+ [ 79.9  77.7  78.5  88.6  77.8]
+ [ 84.9 113.1  87.6 144.8  86.4]]
+fees distances [ 90.3  82.6  41.9  41.8  80.  144.8  62.1  52.9  84.5  68.7  52.1  80.7
+  75.3  60.9  22.3  78.4  78.7  93.3  70.2  57.8  67.3  66.5  79.8  83. ]
+auth control L2 by option quantiles [[ 36.3  21.7  21.9  39.5  29.2]
+ [ 38.   27.3  31.5  64.7  33.2]
+ [ 56.4  49.   46.5  81.8  54.2]
+ [ 79.   72.4  75.5 109.   84.5]
+ [ 94.8  88.8 138.8 153.5  94.6]]
+fees distances [ 90.1  81.9  86.   77.   95.4  97.5  87.  116.6  72.2  64.7  64.7  85.9
+  90.8  81.6  90.1 110.2  81.1  81.4  83.4  79.7  64.8  84.5  70.4  39.5
+  67.9  82.8  62.8  64.7 139.5 153.5  67.   48.5]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q']
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=rem(M[:16,3].mean(0));O=rem(M[:16][:,[0,1,2,4]].mean((0,1)));N=rem(M[16:32,3].mean(0));C=rem(A[48:,3].mean(0))
+for name,B in [('option',O),('topic',N),('control',C)]:
+ d=P-B;d/=np.linalg.norm(d);mid=(P+B)/2; threshold=d@mid
+ print(name,'sep',np.linalg.norm(P-B),'threshold',round(float(threshold),1))
+ for group,V in [('matchedpos',M[:16]),('matchedneg',M[16:32]),('pos',A[:24]),('neg',A[24:48]),('control',A[48:])]:
+  z=V@d-threshold;print(group,'fee',np.round(z[:,3],1),'other range',np.round(np.percentile(z[:,[0,1,2,4]],[0,10,50,90,100]),1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+option sep 32.78570112451853 threshold -349.6
+matchedpos fee [ 17.    1.5  -7.5  28.4  23.9  13.8   4.4 -26.4  15.5  19.8  72.8  22.3
+  20.4  -9.9  35.5  30.7] other range [-66.2 -53.  -24.7  29.8  52.9]
+matchedneg fee [-67.2 -48.6 -50.  -36.1 -12.6 -64.7  -7.1 -60.7  21.6 -64.  -51.2 -51.7
+ -26.3 -60.4  39.8   3.6] other range [-97.1 -60.6 -19.5  30.9  55.4]
+pos fee [ 40.4  -8.9  16.   30.2  45.    8.7  24.2 -17.2  22.2  12.  -33.5  -3.3
+  43.7  17.6  36.1  51.9 -36.5  76.7  12.1 -11.4 -13.7  17.5  -8.2   4.6] other range [-67.  -46.5  -9.7  41.5  57.4]
+neg fee [-56.1 -53.7 -18.1 -16.9 -50.5 -81.4 -34.9  34.5 -57.7 -41.7  13.9 -47.9
+ -27.3 -34.6  26.8 -50.5 -49.9 -64.1 -41.4 -31.4 -40.6 -41.9 -51.  -52.9] other range [-74.7 -38.5  -5.7  40.4  60.4]
+control fee [-62.4 -47.3 -59.8 -49.8 -66.2 -69.  -54.9 -85.9 -46.7 -40.2 -40.2 -58.6
+ -10.  -54.8 -62.4 -76.3 -53.3 -52.2 -54.4 -50.7 -40.  -51.1  -0.3 -13.
+  -0.5 -53.3 -37.4 -39.6 -90.6 -94.3 -39.1  44.6] other range [-92.7 -38.7  -0.9  32.1  51.2]
+topic sep 56.6759402866495 threshold -552.0
+matchedpos fee [ 26.1   9.9   7.4  49.5  36.6  24.7  15.2 -18.2  23.5  26.9  93.7  39.6
+  34.3  -3.1  46.6  40.6] other range [-63.8 -45.9 -10.1  54.8  94.3]
+matchedneg fee [-67.8 -45.7 -45.7 -30.1  -5.6 -65.7   0.3 -62.9  33.  -65.5 -47.5 -45.
+ -19.9 -58.7  60.8  12.7] other range [-102.3  -56.    -7.1   57.5   81.5]
+pos fee [ 60.5  -1.3  24.9  42.9  57.5  19.3  37.   -7.6  32.8  22.8 -26.1   7.
+  67.   30.1  47.6  70.4 -31.9 108.   35.   -2.1  -3.9  32.    5.4  11.6] other range [-64.8 -43.1   7.9  67.5  87.3]
+neg fee [-56.4 -53.3 -11.4  -9.1 -49.7 -91.6 -29.8  56.  -55.2 -36.1  29.4 -48.4
+ -15.6 -29.   36.  -48.8 -47.6 -61.8 -38.  -26.8 -37.  -36.6 -49.6 -52.6] other range [-69.6 -31.7  13.   66.7  87.7]
+control fee [ -60.3  -43.9  -56.5  -47.3  -65.7  -67.4  -48.   -84.4  -39.6  -34.2
+  -34.2  -56.6  -13.   -52.1  -60.3  -78.8  -51.4  -50.7  -52.5  -49.9
+  -34.7  -50.6   11.2   -7.5    6.1  -52.3  -33.2  -34.4 -101.5 -110.3
+  -36.    61.2] other range [-96.2 -32.2  17.3  57.1  87.2]
+control sep 73.65217664119324 threshold -576.9
+matchedpos fee [ 34.7  18.5  15.5  57.2  47.3  32.6  25.7  -9.8  31.7  34.7 102.5  46.6
+  44.2   4.7  55.6  47.8] other range [-57.2 -38.6  -0.7  64.9 106. ]
+matchedneg fee [-59.2 -37.5 -37.  -20.1   3.3 -56.7  10.5 -54.3  43.3 -57.8 -38.5 -37.6
+ -11.9 -50.5  72.8  22. ] other range [-92.6 -47.4   3.   70.3  93. ]
+pos fee [ 72.    7.1  34.   52.7  66.   28.9  44.3   2.   42.1  32.4 -15.2  16.4
+  79.1  40.3  56.   80.3 -25.1 119.1  38.7   6.6   4.5  41.9  14.4  20.6] other range [-56.6 -34.8  18.7  79.3 100. ]
+neg fee [-47.  -44.4  -3.3   0.  -42.1 -85.5 -22.5  67.7 -46.8 -28.7  34.2 -40.7
+ -12.2 -21.5  45.2 -39.9 -40.2 -54.2 -30.9 -17.8 -29.5 -27.5 -42.  -44.8] other range [-58.2 -24.2  22.9  78.2  99.4]
+control fee [ -52.4  -38.3  -47.   -38.8  -56.6  -58.2  -42.4  -75.   -32.2  -26.6
+  -26.6  -47.9   -9.7  -43.6  -52.4  -71.5  -43.5  -43.2  -45.3  -41.6
+  -25.1  -44.    19.1    1.3   10.8  -44.1  -24.9  -26.3  -93.  -103.2
+  -28.3   71.9] other range [-87.4 -23.4  27.6  68.4  99.1]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q']
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=rem(M[:16,3].mean(0)); others=[rem(M[:16,j].mean(0)) for j in [0,1,2,4]]+[rem(M[16:32,j].mean(0)) for j in range(5)]+[rem(A[48:,j].mean(0)) for j in range(5)]
+W=np.array([P-o for o in others]);W/=np.linalg.norm(W,axis=-1,keepdims=True);b=np.array([-w@((P+o)/2) for w,o in zip(W,others)])
+for name,N in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ gates=(N@W.T+b).min(-1);extra=np.clip(gates/8,0,1)*5
+ old=scorer.logits(scorer.load('scorer_in.npz'),N);new=old+extra
+ print(name,'fee gates',np.round(gates[:,3],1),'fee wins',sum(new.argmax(-1)==3),'changed',sum(old.argmax(-1)"'!=new.argmax(-1)),'"'wrongdept boosted',np.round(extra[:,[0,1,2,4]].max(),1))
+print('evidence check')
+N=np.load('evidence_M.npz')['M']; old=scorer.logits(scorer.load('scorer_in.npz'),N);gates=(N@W.T+b).min(-1);extra=np.clip(gates/8,0,1)*5;new=old+extra
+for i in range(len(N)):print(i,scorer.DEPTS[old[i].argmax()],scorer.DEPTS[new[i].argmax()],np.round(extra[i],1),round(float(gates[i,3]),1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 654ms:
+matched pos fee gates [ 13.3  -0.5  -3.6   2.3  -9.1  14.8  -1.3 -26.8  12.6  16.8 -25.1  16.
+  -1.6 -10.5  -3.9  17.9] fee wins 7 changed 7 wrongdept boosted 4.6
+matched neg fee gates [-70.8 -51.2 -50.5 -39.3 -15.  -69.7 -11.9 -67.4  -3.2 -67.6 -54.1 -49.6
+ -29.7 -61.2 -30.   -0.1] fee wins 0 changed 1 wrongdept boosted 4.3
+auth pos fee gates [-25.3 -10.1   7.7  -2.6  -3.2   4.5  19.5 -19.5   7.6   7.  -39.4  -6.9
+ -34.3  -1.4   7.7 -18.4 -36.6 -47.7  12.9 -11.6 -14.   -2.7  -9.1  -0.4] fee wins 10 changed 6 wrongdept boosted 5.0
+auth neg fee gates [-62.7 -59.1 -20.3 -20.2 -54.5 -92.7 -35.9 -25.3 -59.6 -40.6  17.6 -54.6
+ -28.  -34.9   7.8 -54.8 -51.9 -65.4 -41.6 -34.4 -43.  -45.  -55.4 -57.9] fee wins 4 changed 3 wrongdept boosted 5.0
+auth control fee gates [ -64.2  -49.2  -64.2  -55.8  -71.5  -73.5  -55.2  -88.3  -45.8  -41.4
+  -41.4  -62.7  -26.2  -58.6  -64.2  -80.1  -57.2  -55.4  -57.8  -55.8
+  -44.6  -53.6   -1.9  -16.8  -10.8  -58.4  -40.2  -39.6 -102.5 -110.3
+  -44.2  -20.7] fee wins 4 changed 3 wrongdept boosted 5.0
+evidence check
+0 disputes fees_fx [0.  0.  0.  3.7 0. ] 5.9
+1 disputes fees_fx [0. 0. 0. 5. 0.] 9.7
+2 disputes disputes [0. 0. 0. 0. 0.] -12.9
+3 disputes disputes [0. 0. 0. 0. 0.] 0.0
+4 disputes disputes [0. 0. 0. 0. 0.] -26.3
+5 disputes fees_fx [0. 0. 0. 5. 0.] 10.3
+6 disputes disputes [0.  0.  0.  0.2 0. ] 0.3
+7 disputes disputes [0. 0. 0. 0. 0.] -13.1
+8 disputes fees_fx [0.  0.  0.  4.8 0. ] 7.8
+9 disputes disputes [0. 0. 0. 0. 0.] -18.0
+10 disputes fees_fx [0.  0.  0.  4.4 1.6] 7.0
+11 cards transfers_topups [0.  5.  5.  0.9 0. ] 1.5
+12 disputes fees_fx [0.  0.  2.7 5.  3.6] 9.6
+13 disputes disputes [0. 0. 0. 0. 0.] -4.5
+14 disputes disputes [0. 0. 0. 0. 0.] -16.1
+15 disputes fees_fx [0.  0.8 3.2 5.  0. ] 12.1
+16 disputes disputes [0. 0. 0. 0. 0.] -56.4
+17 disputes disputes [0. 0. 0. 0. 0.] -55.1
+18 disputes disputes [0. 0. 0. 0. 0.] -53.8
+19 fees_fx fees_fx [0. 0. 0. 0. 0.] -97.2
+20 disputes cards [3.1 0.  0.  0.  0. ] -10.0
+21 fees_fx fees_fx [0. 0. 0. 0. 0.] -106.5
+22 fees_fx fees_fx [0. 0. 0. 0. 0.] -109.3
+23 fees_fx fees_fx [0. 0. 0. 0. 0.] -92.1
+24 fees_fx fees_fx [0. 0. 0. 0. 0.] -123.3
+25 disputes disputes [0. 0. 0. 0. 0.] -55.5
+26 disputes disputes [0. 0. 0. 0. 0.] -38.9
+27 disputes disputes [0. 0. 0. 0. 0.] -3.1
+28 fees_fx fees_fx [0. 2. 0. 0. 0.] -98.8
+29 disputes disputes [0. 0. 0. 0. 0.] -58.5
+30 fees_fx disputes [0. 5. 5. 0. 0.] -120.9
+31 disputes disputes [0. 0. 0. 0. 0.] -39.5
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+M=np.load('matched_M.npz')['M'];z=scorer.logits(scorer.load('scorer_in.npz'),M)
+for i in range(32):print(i,scorer.DEPTS[z[i].argmax()],np.round(z[i],1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 565ms:
+0 disputes [-0.2  0.2 -1.7 -0.7 -1.7]
+1 disputes [-0.9  0.1 -1.2 -0.8 -1.4]
+2 disputes [-1.3 -0.7 -1.9 -1.4 -2.4]
+3 disputes [-1.  -0.7 -2.2 -0.7 -2.1]
+4 disputes [-0.6  0.1 -1.4 -0.1 -2. ]
+5 disputes [-1.5  0.2 -1.8 -1.  -2.2]
+6 disputes [-1.1 -0.4 -1.2 -0.9 -1.6]
+7 disputes [-1.4 -0.6 -1.4 -1.6 -1.8]
+8 disputes [-0.6 -0.2 -1.  -0.6 -1.5]
+9 disputes [-1.3 -0.4 -1.4 -0.8 -1.8]
+10 cards [-0.  -0.3 -2.  -0.1 -1.9]
+11 disputes [-0.9 -0.9 -1.9 -1.  -1.8]
+12 disputes [-0.5 -0.3 -0.5 -0.7 -1. ]
+13 disputes [-1.4 -0.5 -2.  -1.2 -2. ]
+14 fees_fx [-0.8 -0.9 -1.7  0.1 -2. ]
+15 fees_fx [-1.6 -1.  -2.  -0.8 -2.1]
+16 disputes [-0.1  1.7 -1.9 -1.9 -1.5]
+17 disputes [-0.8  0.6 -1.1 -1.8 -1. ]
+18 disputes [-1.1  2.1 -1.8 -1.6 -1.8]
+19 disputes [-0.8  0.5 -1.7 -1.5 -1.4]
+20 disputes [-0.5  2.3 -1.7 -1.  -1.6]
+21 disputes [-1.6  2.  -1.7 -2.1 -1.7]
+22 disputes [-0.9  1.  -0.8 -1.  -1.2]
+23 disputes [-1.1  1.6 -0.7 -2.2 -1.5]
+24 disputes [-0.4  0.7 -1.  -0.4 -1.1]
+25 disputes [-1.3  0.6 -1.5 -2.2 -1.4]
+26 disputes [ 0.5  0.9 -1.9 -1.8 -1.3]
+27 disputes [-0.8  0.  -1.5 -2.  -0.8]
+28 disputes [-0.4  0.  -0.5 -1.3 -0.8]
+29 disputes [-1.5  2.2 -2.3 -2.  -1.7]
+30 disputes [-0.   0.8 -1.  -0.  -1.1]
+31 disputes [-1.   0.5 -1.  -0.9 -1. ]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The first candidate changes unrelated routes. I will revise the gate and check it against messages about refunds, declined payments, short cash withdrawals, and fees.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');C=np.mean(np.concatenate([A,M]),axis=(0,1));C/=np.linalg.norm(C)
+def normalize(V):return V/np.expand_dims(V@C,-1)*1000
+A=normalize(A);M=normalize(M);Q=[]
+vs=[M[32,3]-M[34,3],M[32,3]-M[33,3],A[48,3]-A[62,3],A[57,3]-A[58,3]]+[A[i,k]-M[32,k] for k,i in enumerate([48,75,62,68,57])]
+for v in vs:
+ for q in Q:v=v-q*(v@q)
+ Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=rem(M[:16,3].mean(0));N=rem(M[16:32,3].mean(0));D=P-N;D/=np.linalg.norm(D);threshold=D@((P+N)/2)
+G=P-rem(M[:16][:,[0,1,2,4]].mean((0,1)));G/=np.linalg.norm(G);gthr=G@((P+rem(M[:16][:,[0,1,2,4]].mean((0,1))))/2)
+for name,V in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ z=V@D-threshold;print(name,'topicfee',np.round(z[:,3],1),'other range',np.round(np.percentile(z[:,[0,1,2,4]],[0,10,50,90,100]),1));z=V@G-gthr;print('option means',np.round(z.mean(0),1),'minmax',np.round(z.min(0),1),np.round(z.max(0),1))
+np.savez('normalized_directions.npz',C=C,Q=np.array(Q),D=D,threshold=threshold,G=G,gthr=gthr)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+matched pos topicfee [ 2.2  0.8  1.2  4.4  2.7  2.6  1.3 -1.3  1.9  2.5  7.3  3.7  2.9  0.2
+  3.7  3.8] other range [-5.5 -4.  -1.   4.1  7. ]
+option means [-1.6  1.6 -2.7  1.6 -3.6] minmax [-3.8 -0.2 -5.9 -1.9 -5.9] [3.6 3.7 2.9 5.6 0.4]
+matched neg topicfee [-5.8 -3.8 -3.7 -2.4 -0.3 -5.9  0.1 -5.8  2.4 -5.8 -3.8 -4.  -1.3 -4.8
+  4.3  0.9] other range [-7.9 -4.7 -0.7  4.   6. ]
+option means [-1.  -0.4 -2.5 -2.6 -2.1] minmax [-4.5 -7.2 -7.7 -5.5 -5. ] [2.7 4.2 1.9 3.1 1.6]
+auth pos topicfee [ 4.4  0.2  2.   3.4  4.6  1.8  3.5 -0.6  2.6  1.8 -2.3  0.5  5.   2.7
+  4.   5.6 -2.1  7.8  6.   0.1  0.2  2.4  0.5  1.2] other range [-6.1 -3.3  0.5  5.4  7.9]
+option means [-0.2  1.9 -1.5  1.4 -2.2] minmax [-3.5 -3.6 -5.3 -2.6 -6. ] [3.3 4.4 2.7 5.6 3. ]
+auth neg topicfee [-4.4 -4.7 -0.5 -0.3 -4.4 -7.8 -2.2  3.8 -4.7 -2.7  3.8 -4.4 -0.5 -2.3
+  2.8 -4.1 -3.9 -6.3 -2.7 -2.3 -2.9 -3.3 -4.1 -4.4] other range [-5.9 -2.5  0.9  4.9  6.4]
+option means [ 0.   1.7 -1.2 -2.8 -1.3] minmax [-4.6 -5.8 -4.9 -7.1 -4.4] [2.5 4.5 3.9 2.6 3.3]
+auth control topicfee [-5.3 -3.7 -5.  -4.  -6.1 -6.1 -3.9 -7.5 -3.6 -2.9 -2.9 -5.1 -0.8 -4.5
+ -5.3 -6.9 -4.1 -4.5 -4.2 -4.5 -3.  -3.6 -0.8 -0.3  2.1 -4.8 -2.6 -2.8
+ -8.2 -8.3 -2.7  4.4] other range [-7.5 -2.6  1.4  4.1  7.9]
+option means [ 0.3  0.8 -0.8 -3.7 -0.9] minmax [-2.6 -4.3 -7.1 -7.4 -5.1] [4.7 4.2 2.9 3.5 2.9]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=list(np.load('matched_directions.npz')['Q']);
+groups=[list(range(48,56)),list(range(56,62)),list(range(62,68)),[68,69,70,71,76,77],[72,73,74,75,78,79]]
+vs=[A[ix,3].mean(0)-A[48:,3].mean(0) for ix in groups[:4]]+[M[:16,3].mean(0)-M[16:32,3].mean(0)]
+for v in vs:
+ for q in Q:v=v-q*(v@q)
+ print('remaining',np.linalg.norm(v));Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+G=rem(np.concatenate([A,M])[:,3].mean(0)-np.concatenate([A,M])[:,[0,1,2,4]].mean((0,1)));print('norm',np.linalg.norm(G));G/=np.linalg.norm(G)
+for name,V in [('matched pos',M[:16]),('matched neg',M[16:32]),('auth pos',A[:24]),('auth neg',A[24:48]),('auth control',A[48:])]:
+ z=V@G;print(name,'means',np.round(z.mean(0),1),'min',np.round(z.min(0),1),'max',np.round(z.max(0),1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+remaining 18.39800249944762
+remaining 13.340560889654483
+remaining 9.046168047093419
+remaining 12.647166828956886
+remaining 21.165710582429266
+norm 15.406257175413362
+matched pos means [115.8 124.2 138.1 140.9 143. ] min [ 96.6 116.9 120.6 132.3 129.7] max [134.  136.5 147.6 148.7 148.5]
+matched neg means [110.8 117.5 135.3 140.9 136.7] min [ 80.2 107.1 124.4 118.4 130. ] max [129.5 138.  143.9 148.5 143.4]
+auth pos means [110.6 120.8 135.8 137.6 141.1] min [ 84.3 107.5 123.6 116.2 125.3] max [131.6 144.1 148.2 156.1 158.7]
+auth neg means [114.  118.7 136.6 144.7 139.3] min [ 88.6 103.  117.9 115.8 123.9] max [139.3 140.8 158.5 160.7 159.6]
+auth control means [110.4 126.4 135.3 145.5 135.5] min [ 84.4 105.6 113.8 126.7 110.8] max [154.8 145.  162.2 164.7 166.1]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q']
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=np.concatenate([M[:16,3],A[:24,3]]).mean(0);N=np.concatenate([M[16:32,3],A[24:,3]]).mean(0)
+D=rem(P-N);D/=np.linalg.norm(D);mid=(P+N)/2;thr=D@mid
+print('sep',D@(P-N),'thr',thr)
+for name,V in [('matchedpos',M[:16]),('matchedneg',M[16:32]),('pos',A[:24]),('neg',A[24:48]),('control',A[48:])]:print(name,np.round((V@D-thr)[:,3],1))
+np.savez('final_direction.npz',D=D,threshold=thr,Q=Q)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+sep 65.20690739641094 thr -612.5550364015711
+matchedpos [ 30.5  14.4  11.1  52.3  43.7  27.6  23.5 -13.8  27.3  30.   98.1  41.5
+  41.7  -0.1  51.3  42.4]
+matchedneg [-63.3 -41.7 -41.2 -23.1  -0.8 -60.5   7.5 -58.1  40.1 -62.5 -42.2 -42.4
+ -15.5 -55.3  71.3  18.4]
+pos [ 70.7   2.8  30.5  49.9  62.   26.1  39.1  -1.   38.   28.7 -17.2  13.6
+  78.6  37.7  51.5  77.9 -30.5 118.6  34.3   2.5   0.8  39.3  11.5  17.4]
+neg [-50.8 -48.1  -7.4  -3.1 -46.6 -91.1 -27.5  66.1 -50.8 -33.9  28.4 -45.
+ -18.2 -26.3  41.5 -43.7 -45.1 -58.7 -36.1 -21.7 -33.5 -30.8 -45.6 -49. ]
+control [ -56.2  -43.1  -49.6  -41.5  -59.3  -60.6  -47.4  -77.4  -36.7  -30.6
+  -30.6  -51.1  -14.   -47.   -56.2  -75.8  -47.3  -47.7  -49.3  -45.4
+  -27.7  -49.6   15.1   -2.4    7.7  -47.6  -29.1  -30.7  -97.5 -109.
+  -32.3   68.7]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+D=np.load('final_direction.npz');N=np.load('evidence_M.npz')['M'];old=scorer.logits(scorer.load('scorer_in.npz'),N);margin=N@D['D']-D['threshold'];extra=np.clip((margin[:,3]+15)/15,0,1)*5;new=old.copy();new[:,3]+=extra
+for i in range(len(N)):print(i,round(float(margin[i,3]),1),round(float(extra[i]),1),scorer.DEPTS[new[i].argmax()])
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 643ms:
+0 40.0 5.0 fees_fx
+1 23.9 5.0 fees_fx
+2 0.0 5.0 fees_fx
+3 33.6 5.0 fees_fx
+4 -12.2 0.9 disputes
+5 28.5 5.0 fees_fx
+6 20.1 5.0 fees_fx
+7 1.5 5.0 fees_fx
+8 35.5 5.0 fees_fx
+9 -0.0 5.0 fees_fx
+10 34.1 5.0 fees_fx
+11 10.4 5.0 fees_fx
+12 30.2 5.0 fees_fx
+13 13.5 5.0 fees_fx
+14 -0.1 5.0 fees_fx
+15 33.7 5.0 fees_fx
+16 -48.3 0.0 disputes
+17 -44.1 0.0 disputes
+18 -39.1 0.0 disputes
+19 -91.8 0.0 fees_fx
+20 7.5 5.0 fees_fx
+21 -103.9 0.0 fees_fx
+22 -102.3 0.0 fees_fx
+23 -85.2 0.0 fees_fx
+24 -121.5 0.0 fees_fx
+25 -44.8 0.0 disputes
+26 -24.4 0.0 disputes
+27 49.0 5.0 fees_fx
+28 -90.9 0.0 fees_fx
+29 -48.8 0.0 disputes
+30 -116.1 0.0 fees_fx
+31 -33.0 0.0 disputes
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q']
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=A[[8,9],3].mean(0);N=A[[32,33],3].mean(0);D=rem(P-N);D/=np.linalg.norm(D);thr=D@((P+N)/2)
+for name,V in [('matchedpos',M[:16]),('matchedneg',M[16:32]),('pos',A[:24]),('neg',A[24:48]),('control',A[48:])]:print(name,np.round((V@D-thr)[:,3],1))
+np.savez('pair_direction.npz',D=D,threshold=thr,Q=Q)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+matchedpos [ 35.6  19.9  10.   50.1  50.4  29.2  28.5 -10.5  32.9  34.6  98.   39.6
+  44.8   2.9  56.4  43.9]
+matchedneg [-57.1 -37.4 -37.2 -17.5   4.4 -53.4  14.2 -50.2  47.6 -56.9 -37.2 -40.3
+ -11.5 -51.5  75.7  24.4]
+pos [ 74.1   6.5  36.1  55.2  66.3  29.7  38.9   3.6  44.   34.3  -9.3  18.9
+  80.9  41.3  54.9  79.1 -29.4 116.1  26.5   5.9   2.5  43.6  14.2  22.3]
+neg [-41.3 -41.3  -3.3   0.9 -40.8 -86.  -24.   71.5 -46.1 -32.2  24.2 -37.3
+ -22.7 -22.8  48.1 -37.7 -41.4 -52.7 -33.9 -15.4 -29.2 -24.3 -41.1 -42.8]
+control [-51.8 -41.9 -43.  -35.3 -51.8 -53.9 -47.9 -72.2 -33.7 -26.7 -26.7 -44.3
+  -2.1 -41.2 -51.8 -70.5 -42.6 -42.4 -45.4 -38.  -21.  -46.7  17.2   2.7
+  13.9 -40.7 -24.1 -27.5 -84.8 -96.4 -26.9  76. ]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');Q=list(np.load('matched_directions.npz')['Q'])
+# Explicit semantic contrasts: refund vs pending, unknown vs wrong amount,
+# short cash vs wrong amount, foreign declined/reverted vs pending.
+for x,y in [([36,72],[43,75]),([29,73],[32,79]),([33,35,78],[32,79]),([38,39],[43,75])]:
+ v=A[x,3].mean(0)-A[y,3].mean(0)
+ for q in Q:v-=q*(v@q)
+ print('norm',np.linalg.norm(v));Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=np.concatenate([M[:16,3],A[:24,3]]).mean(0);N=np.concatenate([M[16:32,3],A[24:,3]]).mean(0);D=rem(P-N);print('separation norm',np.linalg.norm(D));D/=np.linalg.norm(D);thr=D@((P+N)/2)
+for name,V in [('matchedpos',M[:16]),('matchedneg',M[16:32]),('pos',A[:24]),('neg',A[24:48]),('control',A[48:])]:print(name,np.round((V@D-thr)[:,3],1))
+np.savez('semantic_direction.npz',D=D,threshold=thr,Q=np.array(Q))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+norm 56.08530826306375
+norm 81.66960764759395
+norm 21.993014630144227
+norm 14.806519316520438
+separation norm 20.753812291376907
+matchedpos [ 6.2  0.7 17.  24.8 -2.8 18.2  5.7  0.7  1.  10.5 30.6 25.3 13.5  7.3
+  3.8 19.3]
+matchedneg [-21.4 -10.4 -10.7  -7.5  -3.5 -19.1  -2.  -21.5  -3.  -17.2 -13.3  -8.1
+  -1.5 -12.1   6.8   0.9]
+pos [ 13.8   5.6   2.8   8.6  11.7  10.6  23.5   0.1   2.9   6.  -17.2   2.2
+  15.7  12.3  15.9  24.3   1.4  33.8  27.7   6.8   7.1   5.5   6.2   6.2]
+neg [-23.  -15.3   0.6   2.4 -16.3   0.8  -6.6   2.8 -16.3  -1.7  31.1 -16.
+  11.4  -6.5   5.6 -14.7 -12.5 -22.7  -1.7  -7.   -7.3 -13.3 -12.5 -14.4]
+control [-16.7  -2.9 -18.7 -16.5 -23.9 -23.5  -4.5 -20.8 -10.7  -8.6  -8.6 -20.8
+ -31.7 -15.7 -16.7 -21.8 -12.6 -15.2 -11.3 -19.  -13.5  -7.6  10.9   1.8
+ -20.4 -19.2  -9.4  -2.  -30.1 -28.4 -10.   -2.1]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+D=np.load('semantic_direction.npz');N=np.load('evidence_M.npz')['M'];old=scorer.logits(scorer.load('scorer_in.npz'),N);margin=N@D['D']-D['threshold'];extra=np.clip((margin[:,3]+1)/2,0,1)*5;new=old.copy();new[:,3]+=extra
+for i in range(len(N)):print(i,round(float(margin[i,3]),1),round(float(extra[i]),1),scorer.DEPTS[new[i].argmax()])
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 537ms:
+0 5.3 5.0 fees_fx
+1 6.1 5.0 fees_fx
+2 -2.3 0.0 disputes
+3 17.5 5.0 fees_fx
+4 -6.3 0.0 disputes
+5 1.4 5.0 fees_fx
+6 1.5 5.0 fees_fx
+7 14.7 5.0 fees_fx
+8 3.1 5.0 fees_fx
+9 2.3 5.0 fees_fx
+10 -0.9 0.2 disputes
+11 16.9 5.0 fees_fx
+12 6.0 5.0 fees_fx
+13 5.3 5.0 fees_fx
+14 -1.3 0.0 disputes
+15 5.5 5.0 fees_fx
+16 -15.3 0.0 disputes
+17 -16.5 0.0 disputes
+18 -16.0 0.0 disputes
+19 -24.9 0.0 fees_fx
+20 -23.8 0.0 disputes
+21 -7.5 0.0 fees_fx
+22 -11.7 0.0 fees_fx
+23 -1.8 0.0 fees_fx
+24 -13.3 0.0 fees_fx
+25 -4.8 0.0 disputes
+26 -6.6 0.0 disputes
+27 6.5 5.0 fees_fx
+28 -3.6 0.0 fees_fx
+29 -19.9 0.0 disputes
+30 -10.5 0.0 fees_fx
+31 0.4 3.5 fees_fx
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > boundary_probes.py <<'PY'
+import json,subprocess
+from pathlib import Path
+from manual_edit import PYTHON
+G={
+'rate':[
+'The exchange rate used for my card purchase seems incorrect.',
+'The exchange rate used for my ATM withdrawal seems incorrect.',
+'You converted my overseas payment at a bad rate.',
+'You converted my overseas cash withdrawal at a bad rate.',
+'The rate for changing currencies on a card purchase was wrong.',
+'The rate for changing currencies at the cash machine was wrong.',
+'I got a worse exchange rate than expected when paying by card.',
+'I got a worse exchange rate than expected when taking out cash.',
+'I think my card purchase has been converted at an incorrect rate.',
+'I think my ATM transaction has been converted at an incorrect rate.',
+'The amount debited for my purchase seems wrong because of the exchange rate.',
+'The amount debited for my cash withdrawal seems wrong because of the exchange rate.',
+'My payment in a foreign currency used an unfair conversion rate.',
+'My withdrawal in a foreign currency used an unfair conversion rate.',
+'Why did I get such a bad rate of exchange on this payment?',
+'Why did I get such a bad rate of exchange on this withdrawal?',
+'I disagree with the exchange rate applied to my card transaction.',
+'I disagree with the exchange rate applied to my cash transaction.',
+'The purchase amount was converted incorrectly between currencies.',
+'The cash withdrawal amount was converted incorrectly between currencies.',
+],
+'unknown':[
+'I noticed a charge that I cannot explain.',
+'I have an unfamiliar payment on my account.',
+'There is a debit on my statement that I never authorised.',
+'I see an unexpected transaction that is not mine.',
+'I found a mysterious charge on my account.',
+'I cannot identify a payment shown in my transaction list.',
+'There is an unknown card payment on my statement.',
+'Someone has taken money from my account without my permission.',
+'I do not remember making this payment.',
+'I found a card transaction I did not make.',
+'I need help with an unauthorised debit.',
+'Why has money been deducted for a purchase I never made?',
+],
+'refund':[
+'The merchant refunded me but the money has not come back.',
+'I am still waiting for a refund to appear.',
+'When will my returned payment arrive?',
+'My refund is missing from my account.',
+'I have not received the money for a cancelled purchase.',
+'The shop says it has issued a refund, where is it?',
+'I returned an item and I want my money back.',
+'Why is the reimbursement taking so long?',
+'The seller promised a refund but it has not arrived.',
+'I am waiting for money from a reversed card payment.',
+'My refund has been pending for several days.',
+'How much longer before the refund is processed?',
+],
+'pending':[
+'My cash withdrawal is still marked as pending.',
+'My ATM transaction has not completed yet.',
+'I am waiting for my card payment to complete.',
+'Why does this cash machine transaction say pending?',
+'The status of my withdrawal has been pending for days.',
+'My purchase is taking a long time to settle.',
+'When will this pending cash withdrawal be released?',
+'The card transaction is stuck waiting for completion.',
+'I need help with a pending ATM debit.',
+'My card purchase still says it is being processed.',
+'Why has my cash withdrawal not settled?',
+'The payment is pending even though the merchant cancelled it.',
+],
+'declined':[
+'My card payment was rejected by the merchant.',
+'The cash machine refused my withdrawal.',
+'I was unable to pay with my card overseas.',
+'I cannot withdraw cash while travelling abroad.',
+'The payment failed even though I have enough money.',
+'The ATM declined my transaction.',
+'Why was my card rejected in a foreign country?',
+'The shop would not accept my payment.',
+'My withdrawal was refused but my balance is sufficient.',
+'I tried to pay in another currency but it was declined.',
+'My card purchase was reversed after it failed.',
+'The cash withdrawal failed but the money was deducted.',
+],
+'amount':[
+'The shop debited more than the price on my receipt.',
+'I was billed for the same purchase twice.',
+'The transaction amount does not match my receipt.',
+'The merchant entered the incorrect purchase amount.',
+'I requested cash but the machine gave me less than requested.',
+'The ATM gave me 20 when I asked for 50.',
+'My balance was reduced but the machine gave me no money.',
+'I received only part of the money I tried to withdraw.',
+'The card payment is for more than the agreed price.',
+'There are two identical debits for one purchase.',
+'I paid in local currency but the merchant charged the wrong price.',
+'The cash machine debited my account for more cash than I received.',
+],
+}
+Path('boundary_messages.json').write_text(json.dumps(G,indent=2))
+subprocess.run([PYTHON,'embed.py','boundary_M.npz',*[s for v in G.values() for s in v]],check=True)
+PY
+<lab>/.venv/bin/python boundary_probes.py" in $WSROOT/laya/s0/sol-r0/step1
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 25361ms:
+W1104 11:30:32.507000 79638 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote boundary_M.npz 80 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,json,scorer
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');B=np.load('boundary_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q'];G=json.load(open('boundary_messages.json'))
+def rem(v):
+ for q in Q:v=v-np.expand_dims(v@q,-1)*q
+ return v
+P=np.concatenate([A[:24,3],M[:16,3],B[:20,3]]).mean(0)
+centers=[];start=20
+for name,rows in list(G.items())[1:]:
+ N=B[start:start+len(rows),3].mean(0);start+=len(rows);centers.append((name,N))
+Ds=[];ts=[];widths=[]
+for name,N in centers:
+ d=rem(P-N);sep=np.linalg.norm(d);d/=sep;th=d@(0.25*P+0.75*N);width=0.2*sep
+ Ds.append(d);ts.append(th);widths.append(width);print(name,'sep',round(sep,1),'width',round(width,1))
+W=np.array(Ds).T;ts=np.array(ts);widths=np.array(widths)
+def extra(V):
+ a=(V@W-ts)/widths;c=np.clip(a,0,1);return 5*np.maximum(c.sum(-1)-4,0)
+S=scorer.load('scorer_in.npz')
+for name,V in [('new rate',B[:20]),('new controls',B[20:]),('matched rate',M[:16]),('matched amount',M[16:32]),('natural rate',A[:24]),('natural controls',A[24:])]:
+ e=extra(V);z=scorer.logits(S,V);z2=z.copy();z2[:,3]+=e[:,3]
+ print(name,'fees boost',np.round(e[:,3],1),'changed',sum(z.argmax(-1)"'!=z2.argmax(-1)),'"'fees',sum(z2.argmax(-1)==3))
+np.savez('circuit_directions.npz',W=W,ts=ts,widths=widths,Q=Q)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 552ms:
+unknown sep 55.8 width 11.2
+refund sep 60.7 width 12.1
+pending sep 60.5 width 12.1
+declined sep 58.1 width 11.6
+amount sep 34.2 width 6.8
+new rate fees boost [5.  5.  0.  0.  5.  5.  5.  5.  5.  5.  5.  0.  5.  5.  0.  0.  5.  5.
+ 5.  1.7] changed 15 fees 15
+new controls fees boost [5.  0.  0.  0.  5.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.
+ 0.  0.  0.  0.  0.  0.  0.  1.1 0.  0.  0.  5.  0.  0.  0.  0.  0.  0.
+ 0.  0.  0.2 0.  0.  0.  0.  0.  0.  5.  0.  0.  5.  5.  0.  0.  0.  2.8
+ 0.  0.  5.  5.  0.  0. ] changed 8 fees 10
+matched rate fees boost [5.  5.  4.5 5.  5.  5.  5.  0.  5.  5.  5.  5.  5.  0.  5.  5. ] changed 12 fees 14
+matched amount fees boost [0.  0.  0.  0.  0.  0.  2.1 0.  5.  0.  0.  0.  0.  0.  5.  5. ] changed 4 fees 4
+natural rate fees boost [5.  0.  5.  5.  5.  5.  5.  0.  5.  5.  0.  5.  5.  5.  5.  5.  0.  5.
+ 5.  0.  0.  5.  3.7 5. ] changed 15 fees 19
+natural controls fees boost [0. 0. 0. 0. 0. 0. 0. 5. 0. 0. 5. 0. 0. 0. 5. 0. 0. 0. 0. 0. 0. 0. 0. 0.
+ 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 5. 0.
+ 0. 0. 0. 0. 0. 0. 0. 5.] changed 3 fees 10
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+D=np.load('circuit_directions.npz');N=np.load('evidence_M.npz')['M'];a=(N@D['W']-D['ts'])/D['widths'];e=5*np.maximum(np.clip(a,0,1).sum(-1)-4,0);z=scorer.logits(scorer.load('scorer_in.npz'),N);z[:,3]+=e[:,3]
+for i in range(len(N)):print(i,round(float(e[i,3]),1),scorer.DEPTS[z[i].argmax()])
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 514ms:
+0 5.0 fees_fx
+1 5.0 fees_fx
+2 0.0 disputes
+3 5.0 fees_fx
+4 0.0 disputes
+5 5.0 fees_fx
+6 5.0 fees_fx
+7 0.0 disputes
+8 5.0 fees_fx
+9 0.0 disputes
+10 5.0 fees_fx
+11 4.9 fees_fx
+12 5.0 fees_fx
+13 5.0 fees_fx
+14 0.0 disputes
+15 5.0 fees_fx
+16 0.0 disputes
+17 0.0 disputes
+18 0.0 disputes
+19 0.0 fees_fx
+20 0.0 disputes
+21 0.0 fees_fx
+22 0.0 fees_fx
+23 0.0 fees_fx
+24 0.0 fees_fx
+25 0.0 disputes
+26 0.0 disputes
+27 5.0 fees_fx
+28 0.0 fees_fx
+29 0.0 disputes
+30 0.0 fees_fx
+31 0.0 disputes
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');B=np.load('boundary_M.npz')['M'].astype('float64')
+P=M[:16,3].mean(0);N=M[16:32,3].mean(0);d=P-N;sep=np.linalg.norm(d);d/=sep;t=d@((P+N)/2)
+for name,V in [('rate',B[:20]),('new controls',B[20:]),('matchedrate',M[:16]),('matchedamount',M[16:32]),('naturalrate',A[:24]),('naturalcontrols',A[24:])]:
+ z=V@d-t; print(name,np.round(z[:,3],0))
+print('sep',sep,'threshold',t)
+np.savez('raw_direction.npz',D=d,threshold=t)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 504ms:
+rate [  580. -1791. -1389.  -743.  1173.  1342.  1538.  1132.   984.  3026.
+  1290.  -571.  2134.  1023.  -647.  -764.  1959.   850.  1754.   327.]
+new controls [ 3270. -1089. -2956.  -584.  3868. -1514. -1452. -1396. -2060.  -611.
+ -2651. -2509. -2791. -4481. -2140. -4766. -1877. -4806.  -953.  -711.
+ -1994. -1653. -5023. -4805. -1368.   129. -1003. -2058. -2935.  1097.
+ -2272.   397. -2193.  -880. -2646. -1407. -1094. -1169.  -130.  -686.
+ -1505. -1734. -2547.  -936. -2215.     9.  -350.  -673.  -265.  3538.
+ -2115.    22. -1723.   -21. -1549. -2195.  2027.   565.   105. -1414.]
+matchedrate [  962.   627.  -924.   473.  2525.   111.   798. -1211.  1303.   775.
+  2424.     5.  1010.  -160.  3137.   877.]
+matchedamount [-1745. -1629. -1160.  -788.   418. -2253.   357. -2359.  1733. -2377.
+ -1517. -2190.  -359. -1924.  2520.   540.]
+naturalrate [ 1954.    93.   999.  1425.  1573.   809.   389.  -292.  1147.   644.
+  4411.   125.  3092.  1208.   959.  1865. -1565.  3660. -3324.  -409.
+  -378.  1017.  -459.   608.]
+naturalcontrols [ 4682. -2386.  -653.  -506. -2391.  3524. -1658.  3514. -1598. -2369.
+  -554. -2481. -2762. -1566.  1225. -1776. -2240. -2884. -1517. -1297.
+ -1093.  -840. -1495. -2408. -1406. -2277. -1466.  -505. -1904. -1458.
+ -2458. -1921. -2064. -3683.  -728. -1352. -4765. -1821. -2920. -3158.
+ -1356. -2514. -1652. -1075.  4623. -1961.  -175.  -528. -4668. -1841.
+ -1374. -1151.  4556.  4810.  -704.  2035.]
+sep 1591.681295782586 threshold 6156.968997028797
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');B=np.load('boundary_M.npz')['M'].astype('float64')
+def ln(V):
+ V=V-V.mean(-1,keepdims=True);return V/np.sqrt((V*V).mean(-1,keepdims=True))
+A=ln(A);M=ln(M);B=ln(B)
+P=np.concatenate([A[:24,3],M[:16,3],B[:20,3]]).mean(0);N=np.concatenate([A[24:,3],M[16:32,3],B[20:,3]]).mean(0);d=P-N;sep=np.linalg.norm(d);d/=sep;t=d@((P+N)/2)
+for name,V in [('rate',B[:20]),('new controls',B[20:]),('matchedrate',M[:16]),('matchedamount',M[16:32]),('naturalrate',A[:24]),('naturalcontrols',A[24:])]:print(name,np.round((V@d-t)[:,3],1))
+print('sep',sep)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+rate [ 2.1 -3.5 -3.3 -1.5  3.1  3.7  3.9  3.   3.1  8.9  3.5 -1.1  5.5  3.
+ -1.  -1.2  5.3  2.9  4.5  1. ]
+new controls [  9.7  -2.5  -7.7  -1.   10.9  -3.6  -3.6  -3.3  -5.2  -1.3  -7.4  -6.
+  -7.1 -13.1  -5.3 -14.5  -4.7 -14.6  -2.   -1.8  -5.   -4.2 -15.6 -14.6
+  -3.    0.7  -2.5  -4.8  -7.7   3.4  -5.8   0.9  -5.7  -2.1  -6.6  -3.2
+  -2.3  -2.4   0.   -1.3  -3.7  -3.9  -6.8  -2.   -5.5   0.4  -0.6  -1.2
+   0.7   9.9  -5.3   0.3  -4.1   0.8  -3.5  -5.3   5.2   1.8   0.8  -3.4]
+matchedrate [ 2.8  2.1 -1.2  2.7  6.3  1.2  2.1 -2.3  3.4  2.3  6.2  1.1  2.8  0.1
+  7.2  2.6]
+matchedamount [-4.6 -3.7 -2.7 -1.8  1.2 -5.9  1.3 -6.2  4.6 -6.2 -3.6 -5.2 -0.3 -4.9
+  6.6  2. ]
+naturalrate [ 5.1  0.6  2.8  4.   4.5  2.2  1.7  0.   3.5  2.4 14.3  1.   8.2  3.3
+  3.1  4.7 -3.7 10.4 -7.7 -0.3 -0.3  3.3 -0.   1.4]
+naturalcontrols [ 15.2  -6.2  -1.1  -0.9  -6.1  18.   -3.6  11.2  -4.   -5.8   0.2  -6.4
+  -6.7  -3.4   3.5  -4.3  -5.6  -7.5  -3.6  -2.8  -2.5  -1.9  -3.7  -6.3
+  -3.8  -6.1  -3.8  -1.2  -5.   -3.8  -5.9  -5.5  -4.8 -10.7  -1.6  -3.4
+ -14.8  -4.7  -7.9  -9.   -3.2  -6.4  -4.1  -2.6  15.5  -5.1  19.8  -0.8
+ -14.2  -4.5  -3.   -2.5  16.6  16.7  -1.1   6. ]
+sep 4.851032101886343
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');B=np.load('boundary_M.npz')['M'].astype('float64');Q=[]
+for v in [A[[68,70,76,77],3].mean(0)-A[[72,73,74,75,78,79],3].mean(0),M[32,3]-M[34,3],M[32,3]-M[33,3]]:
+ for q in Q:v=v-q*(v@q)
+ Q.append(v/np.linalg.norm(v))
+def rem(v):
+ for q in Q:v=v-q*(v@q)
+ return v
+P=M[:16,3].mean(0);N=M[16:32,3].mean(0);D=rem(P-N);print('sep',np.linalg.norm(D));D/=np.linalg.norm(D);thr=D@((P+N)/2)
+for name,V in [('rate',B[:20]),('new controls',B[20:]),('matchedrate',M[:16]),('matchedamount',M[16:32]),('naturalrate',A[:24]),('naturalcontrols',A[24:])]:print(name,np.round((V@D-thr)[:,3],1))
+np.savez('simple_direction.npz',D=D,threshold=thr,Q=np.array(Q))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+sep 111.0159024792924
+rate [ 97.1  39.6 -66.  -44.2  26.4  51.2  27.4  24.7  32.4 112.7 114.8  15.6
+  68.4  18.7  10.4  -5.7  57.5  64.6  29.3 -44.9]
+new controls [ 129.6  -73.3  -99.   -46.7  104.   -80.6 -100.6  -92.4  -88.8  -80.6
+  -76.6  -63.4  -77.3 -120.8  -94.8 -147.2  -85.2 -130.   -53.1  -82.9
+  -93.5 -105.7 -155.9 -179.1  -28.8  -20.2  -94.5  -75.3 -100.2   39.9
+  -86.8  -73.7  -67.6  -77.6 -107.7  -78.8  -77.9  -72.3  -29.   -29.7
+  -73.3  -83.8 -112.2  -58.8  -97.    32.7  -53.   -32.8   20.4  123.9
+ -110.9  -26.1  -70.2   15.7  -49.  -101.    13.6   46.    11.8  -14.1]
+matchedrate [ 49.4  27.2   9.6 117.1  55.7  64.2 -21.5 -46.6  44.8  76.8 162.6  91.
+  12.6  22.6 108.5 114.1]
+matchedamount [-105.5  -96.   -64.1  -64.6   14.  -106.9  -14.6 -111.9   33.5 -109.8
+  -99.5  -85.3  -33.   -87.1   22.    21. ]
+naturalrate [ 10.   18.9  31.5  58.2  81.7 -12.4  95.1 -33.9  61.   33.4 100.1   1.5
+  41.7   9.9  96.6  54.9 -39.4 239.  -77.3  -1.4 -22.1  13.3 -18.3  -6.5]
+naturalcontrols [ 101.2 -118.6  -18.9  -27.8 -106.5  -49.4  -71.6  172.3  -91.4  -80.4
+   66.2  -86.4  -34.5  -50.1   59.9  -72.3  -94.8 -140.6  -38.8  -48.9
+  -66.1  -59.7  -90.3 -104.8  -56.9    4.4 -112.7  -75.2 -121.1 -117.7
+ -101.5 -133.4  -96.9  -81.4  -36.   -86.2 -150.4  -99.3 -165.3 -158.9
+  -89.9 -107.2  -95.   -62.9  133.1  -71.4 -400.8  -16.3 -163.7  -74.5
+  -63.7  -37.    33.3   34.5  -48.5   87.5]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The candidate preserves most control routes, but it still makes errors on some exchange-rate messages. I am checking the final gate against the remaining cases before I save the weights and notes.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+A=np.load('authored_M.npz')['M'].astype('float64');M=np.load('matched_M.npz')['M'].astype('float64');B=np.load('boundary_M.npz')['M'].astype('float64');E=np.load('evidence_M.npz')['M'].astype('float64');Q=np.load('matched_directions.npz')['Q']
+def rem(v):
+ for q in Q:v=v-q*(v@q)
+ return v
+P=np.concatenate([A[:24,3],M[:16,3],B[:20,3]]).mean(0);N=B[[20,24],3].mean(0);d=rem(P-N);sep=np.linalg.norm(d);d/=sep;t=d@((P+N)/2)
+print('sep',sep)
+for name,V in [('ownrate',B[:20]),('ownneg',B[20:]),('evidence',E)]:print(name,np.round((V@d-t)[:,3],1))
+np.savez('charge_direction.npz',D=d,threshold=t,sep=sep)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+sep 46.090397290643786
+ownrate [ 26.5  48.6  75.6  65.2  22.7  16.2  13.1   4.2  16.8 -21.   17.6  58.9
+ -12.2   7.4  53.9  47.5   0.8  21.4  -2.   31.6]
+ownneg [-26.1  73.3  81.4  61.3 -20.   81.3  78.9  71.2  78.8  64.4 101.9  71.
+  82.2  44.   75.6  49.6  89.3  38.1  69.4  71.7  91.7  86.7  36.3  45.
+  72.3  36.4  72.1  75.1  88.6  20.9  85.5  29.9  99.4  72.6  81.9  70.7
+  66.7  64.5  38.4  65.3  74.9  72.9  90.4  69.4  77.1  40.5  61.3  57.3
+  30.7 -19.7  70.3  52.9  78.8  39.1  72.8  78.9 -17.   35.1  45.7  76.4]
+evidence [ 15.7  32.9  47.9  16.8  54.6  24.6  27.6  50.7  18.6  43.3  17.9  52.3
+  39.9  35.7  45.4  23.9  80.2  74.6  67.2 101.7  45.3 112.5 102.2  91.8
+ 125.1  74.3  60.9   6.7  94.9  79.4 113.4  78.1]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > build_scorer.py <<'PY'
+\"\"\"Build a hand-specified contrast circuit. No training or fitted solver.
+
+All semantic contrasts use authored marker vectors. Evidence is not read here.
+\"\"\"
+import numpy as np
+import scorer
+
+A = np.load('authored_M.npz')['M'].astype(np.float64)
+M = np.load('matched_M.npz')['M'].astype(np.float64)
+B = np.load('boundary_M.npz')['M'].astype(np.float64)
+
+def remove(v, axes):
+    v = v.copy()
+    for axis in axes:
+        v -= axis * (v @ axis)
+    return v
+
+def add_axis(axes, vector):
+    vector = remove(vector, axes)
+    axes.append(vector / np.linalg.norm(vector))
+
+# Cancel salutations, unrelated subject changes and ordinary department matches.
+axes = []
+for vector in [
+    M[32, 3] - M[34, 3],  # Hello / Thank you
+    M[32, 3] - M[33, 3],  # Hello / generic help request
+    A[48, 3] - A[62, 3],  # replacement card / bank transfer
+    A[57, 3] - A[58, 3],  # identity verification / account closure
+] + [A[i, k] - M[32, k] for k, i in enumerate([48, 75, 62, 68, 57])]:
+    add_axis(axes, vector)
+
+P = np.concatenate([M[:16, 3], A[:24, 3]]).mean(0)
+N = np.concatenate([M[16:32, 3], A[24:, 3]]).mean(0)
+
+def contrast(positive, negative, basis):
+    vector = remove(positive - negative, basis)
+    separation = np.linalg.norm(vector)
+    vector /= separation
+    midpoint = vector @ ((positive + negative) / 2)
+    return vector, midpoint, separation
+
+primary = contrast(P, N, axes)
+
+# An independent topic check cancels four explicit distractor concepts.
+semantic_axes = axes.copy()
+for left, right in [
+    ([36, 72], [43, 75]),       # refund / pending
+    ([29, 73], [32, 79]),       # unknown debit / wrong amount
+    ([33, 35, 78], [32, 79]),   # short cash / wrong amount
+    ([38, 39], [43, 75]),       # foreign declined or reversed / pending
+]:
+    add_axis(semantic_axes, A[left, 3].mean(0) - A[right, 3].mean(0))
+semantic = contrast(P, N, semantic_axes)
+
+# Require stronger separation from unexplained-charge language.
+rate_center = np.concatenate([A[:24, 3], M[:16, 3], B[:20, 3]]).mean(0)
+unknown_charge_center = B[[20, 24], 3].mean(0)
+charge_check = contrast(rate_center, unknown_charge_center, axes)
+
+# Fixed geometric margins: broad primary detection, loose topic veto,
+# conservative unexplained-charge veto. No threshold search is performed.
+gates = [
+    (primary, -1 / 3, 1 / 6),
+    (semantic, -1 / 2, 1 / 6),
+    (charge_check, 1 / 4, 1 / 4),
+]
+columns, biases = [], []
+for (direction, midpoint, separation), start, width in gates:
+    columns.append(direction / (width * separation))
+    biases.append(-(midpoint + start * separation) / (width * separation))
+W = np.stack(columns, axis=1)
+b = np.array(biases)
+
+S = scorer.load('scorer_in.npz')
+# ReLU(a)-ReLU(a-1) clips each gate to [0,1].
+S['extra_W0'] = np.concatenate([W, W], axis=1).astype(np.float32)
+S['extra_b0'] = np.concatenate([b, b - 1]).astype(np.float32)
+S['extra_W1'] = np.array([[1], [1], [1], [-1], [-1], [-1]], dtype=np.float32)
+# Department-specific biases broadcast over the fixed five options.
+# Other options have a one-unit safety margin beyond the maximum gate sum.
+S['extra_b1'] = np.array([[-4], [-4], [-4], [-2], [-4]], dtype=np.float32)
+S['extra_W2'] = np.array([[5]], dtype=np.float32)
+S['extra_b2'] = np.zeros(1, dtype=np.float32)
+scorer.save(S, 'scorer_out.npz')
+print('Wrote scorer_out.npz; all original arrays are unchanged.')
+PY
+<lab>/.venv/bin/python build_scorer.py" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 560ms:
+Wrote scorer_out.npz; all original arrays are unchanged.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import csv,json,numpy as np,scorer
+S=scorer.load('scorer_in.npz');T=scorer.load('scorer_out.npz')
+assert all(np.array_equal(T[k],v) for k,v in S.items())
+assert all(np.isfinite(v).all() for v in T.values())
+E=np.load('evidence_M.npz')['M'];rows=list(csv.DictReader(open('evidence.csv'),delimiter='\\t'))
+z=scorer.logits(S,E);y=scorer.logits(T,E);pred=scorer.predict(T,E)
+print('Evidence correct',sum(p==r['correct'] for p,r in zip(pred,rows)),'/',len(rows))
+print('Correction rows correct',sum(pred[i]==rows[i]['correct'] for i in range(16)),'/16')
+print('Control predictions preserved',sum(z[16:].argmax(-1)==y[16:].argmax(-1)),'/16')
+print('Unchanged non-fees logits',np.array_equal(z[:,[0,1,2,4]],y[:,[0,1,2,4]]))
+for i,(p,r) in enumerate(zip(pred,rows)):
+ if p"'!=r['"'correct']: print('Mismatch',i,p,r['correct'])
+for filename in ['authored_M.npz','matched_M.npz','boundary_M.npz']:
+ X=np.load(filename)['M']; a=scorer.logits(S,X); b=scorer.logits(T,X)
+ assert np.array_equal(a[:,[0,1,2,4]],b[:,[0,1,2,4]])
+ assert np.all(b[:,3]>=a[:,3]) and np.all(b[:,3]-a[:,3]<=5.001)
+ for n in [1,3,7]:
+  assert np.allclose(scorer.logits(T,X[:n]),b[:n],atol=1e-5)
+ print(filename,'changed',sum(a.argmax(-1)"'!=b.argmax(-1)),'"'/',len(X),'fees bonus range',float((b-a).min()),float((b-a).max()))
+np.savez('/tmp/laya_step1_check.npz',before=z,after=y)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 602ms:
+Evidence correct 32 / 32
+Correction rows correct 16 /16
+Control predictions preserved 16 /16
+Unchanged non-fees logits True
+authored_M.npz changed 18 / 80 fees bonus range 0.0 5.0
+matched_M.npz changed 15 / 35 fees bonus range 0.0 5.0
+boundary_M.npz changed 20 / 80 fees bonus range 0.0 5.0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The saved scorer passes all 32 supplied examples and preserves all 16 supplied control routes. The original weights remain unchanged. I will now check new message wording and confirm that the file loads correctly.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > check_holdout.py <<'PY'
+import json,subprocess
+from pathlib import Path
+from manual_edit import PYTHON
+rate=[
+'The conversion from euros to pounds on my card receipt used the wrong rate.',
+'Why did you use the wrong exchange rate for this debit-card payment?',
+'The exchange rate on yesterday\\'s cash withdrawal is incorrect.',
+'My ATM withdrawal was converted at an unusually poor currency rate.',
+'That card purchase should have used the interbank rate.',
+'I was given an unfair exchange rate when withdrawing francs.',
+'The rate applied to a purchase in dollars does not look right.',
+'I paid abroad and the amount is wrong because of the currency conversion.',
+'Can you fix the exchange rate used for my withdrawal?',
+'The cash exchange rate was worse than expected.',
+]
+control=[
+'My international card payment was declined.',
+'My cash withdrawal is pending since yesterday.',
+'I see a charge I did not authorise.',
+'The ATM paid out less cash than I asked for.',
+'The refund from the shop is still missing.',
+'My bank transfer has not reached the recipient.',
+'How do I unlock my payment card?',
+'Please help me change my phone number.',
+'How much is the monthly plan fee?',
+'Why was the same purchase charged twice?',
+]
+Path('holdout_messages.json').write_text(json.dumps({'rate':rate,'control':control},indent=2))
+subprocess.run([PYTHON,'embed.py','holdout_M.npz',*(rate+control)],check=True)
+PY
+<lab>/.venv/bin/python check_holdout.py" in $WSROOT/laya/s0/sol-r0/step1
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from pathlib import Path
+for name in ['directions.npz','matched_directions.npz','normalized_directions.npz','final_direction.npz','pair_direction.npz','semantic_direction.npz','circuit_directions.npz','raw_direction.npz','simple_direction.npz','charge_direction.npz']:
+ Path(name).unlink(missing_ok=True)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 22624ms:
+W1104 11:36:35.061000 90944 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote holdout_M.npz 20 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json,numpy as np,scorer
+M=np.load('holdout_M.npz')['M'];A=scorer.load('scorer_in.npz');B=scorer.load('scorer_out.npz');p=scorer.predict(A,M);q=scorer.predict(B,M);msgs=json.load(open('holdout_messages.json'))
+print('Holdout correction',sum(x=='fees_fx' for x in q[:10]),'/10')
+print('Holdout controls preserved',sum(x==y for x,y in zip(p[10:],q[10:])),'/10')
+for i,(s,x,y) in enumerate(zip(msgs['rate']+msgs['control'],p,q)):print(i,x,'->',y,s)
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 530ms:
+Holdout correction 9 /10
+Holdout controls preserved 10 /10
+0 disputes -> fees_fx The conversion from euros to pounds on my card receipt used the wrong rate.
+1 disputes -> disputes Why did you use the wrong exchange rate for this debit-card payment?
+2 disputes -> fees_fx The exchange rate on yesterday's cash withdrawal is incorrect.
+3 disputes -> fees_fx My ATM withdrawal was converted at an unusually poor currency rate.
+4 fees_fx -> fees_fx That card purchase should have used the interbank rate.
+5 disputes -> fees_fx I was given an unfair exchange rate when withdrawing francs.
+6 fees_fx -> fees_fx The rate applied to a purchase in dollars does not look right.
+7 disputes -> fees_fx I paid abroad and the amount is wrong because of the currency conversion.
+8 disputes -> fees_fx Can you fix the exchange rate used for my withdrawal?
+9 disputes -> fees_fx The cash exchange rate was worse than expected.
+10 disputes -> disputes My international card payment was declined.
+11 disputes -> disputes My cash withdrawal is pending since yesterday.
+12 disputes -> disputes I see a charge I did not authorise.
+13 disputes -> disputes The ATM paid out less cash than I asked for.
+14 disputes -> disputes The refund from the shop is still missing.
+15 transfers_topups -> transfers_topups My bank transfer has not reached the recipient.
+16 account_security -> account_security How do I unlock my payment card?
+17 account_security -> account_security Please help me change my phone number.
+18 fees_fx -> fees_fx How much is the monthly plan fee?
+19 fees_fx -> fees_fx Why was the same purchase charged twice?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+S=scorer.load('scorer_out.npz');M=np.load('holdout_M.npz')['M'];a=M@S['extra_W0']+S['extra_b0'];c=np.maximum(a[...,:3],0)-np.maximum(a[...,3:],0)
+print('fees gate values',np.round(c[:,3],3))
+print('new logits for missed input',scorer.logits(S,M[1:2]))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 558ms:
+fees gate values [[1.    1.    1.   ]
+ [0.    1.    1.   ]
+ [1.    1.    0.59 ]
+ [1.    1.    0.211]
+ [1.    1.    0.   ]
+ [1.    1.    1.   ]
+ [1.    1.    0.   ]
+ [1.    1.    1.   ]
+ [1.    1.    1.   ]
+ [1.    1.    1.   ]
+ [0.    0.    1.   ]
+ [0.    1.    1.   ]
+ [1.    1.    0.   ]
+ [0.    1.    1.   ]
+ [1.    0.    1.   ]
+ [0.    0.    1.   ]
+ [0.    0.    1.   ]
+ [0.    0.    1.   ]
+ [0.    0.    1.   ]
+ [1.    1.    0.   ]]
+new logits for missed input [[-0.9097917  0.8154244 -2.2189221 -1.6544415 -1.9060011]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+S=scorer.load('scorer_out.npz');M=np.load('holdout_M.npz')['M'];a=M@S['extra_W0']+S['extra_b0'];print(a[1,3,:3])
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 567ms:
+[-0.9613037  1.9574928  5.6687126]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The new wording check passes 9 of 10 exchange-rate messages and preserves all 10 control routes. The missed message uses “debit-card payment.” I will check whether card-type wording affects the primary gate.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > card_type_probes.py <<'PY'
+import json,subprocess
+from pathlib import Path
+from manual_edit import PYTHON
+frames=[
+'My {} payment used the wrong exchange rate.',
+'The exchange rate for this {} purchase is incorrect.',
+'Why is the exchange rate on my {} transaction wrong?',
+'I paid overseas with my {} and the conversion rate was bad.',
+'The currency rate applied to my {} purchase looks wrong.',
+'I got a poor exchange rate when I paid using my {}.',
+]
+G={k:[f.format(k) for f in frames] for k in ['card','debit-card','credit-card']}
+Path('card_type_messages.json').write_text(json.dumps(G,indent=2))
+subprocess.run([PYTHON,'embed.py','card_type_M.npz',*[s for rows in G.values() for s in rows]],check=True)
+PY
+<lab>/.venv/bin/python card_type_probes.py" in $WSROOT/laya/s0/sol-r0/step1
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cp scorer_out.npz /tmp/laya_step1_pre_card_type.npz' in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 22394ms:
+W1104 11:37:50.783000 93609 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote card_type_M.npz 18 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,scorer
+# Execute the hand-written derivation to expose its named directions.
+exec(open('build_scorer.py').read())
+C=np.load('card_type_M.npz')['M'].astype('float64'); q=axes.copy()
+for sl in [slice(6,12),slice(12,18)]:add_axis(q,C[sl,3].mean(0)-C[:6,3].mean(0))
+alt=contrast(P,N,q);v,t,sep=alt;print('new separation',sep)
+T=scorer.load('scorer_out.npz');col=v/(sep/6);bias=-(t-sep/3)/(sep/6)
+T['extra_W0'][:,0]=col;T['extra_W0'][:,3]=col;T['extra_b0'][0]=bias;T['extra_b0'][3]=bias-1
+for fname in ['evidence_M.npz','holdout_M.npz','card_type_M.npz']:
+ X=np.load(fname)['M'];p=scorer.predict(T,X);print(fname,p)
+scorer.save(T,'scorer_type_candidate.npz')
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 653ms:
+Wrote scorer_out.npz; all original arrays are unchanged.
+new separation 19.506855587601976
+evidence_M.npz ['fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'disputes', 'disputes', 'disputes', 'fees_fx', 'disputes', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'disputes', 'disputes', 'disputes', 'fees_fx', 'disputes', 'fees_fx', 'fees_fx']
+holdout_M.npz ['fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'disputes', 'fees_fx', 'disputes', 'disputes', 'disputes', 'transfers_topups', 'account_security', 'account_security', 'fees_fx', 'fees_fx']
+card_type_M.npz ['fees_fx', 'fees_fx', 'fees_fx', 'disputes', 'fees_fx', 'disputes', 'disputes', 'fees_fx', 'fees_fx', 'disputes', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'fees_fx', 'disputes', 'fees_fx', 'disputes']
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+exec(open('build_scorer.py').read())
+pending=contrast(rate_center,B[44:56,3].mean(0),axes);d,t,sep=pending
+print('sep',sep)
+for fname in ['evidence_M.npz','holdout_M.npz']:
+ X=np.load(fname)['M'];print(fname,np.round((X@d-t)[:,3],1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 520ms:
+Wrote scorer_out.npz; all original arrays are unchanged.
+sep 60.45026094311218
+evidence_M.npz [  39.8   23.9    0.2   33.7  -12.2   28.6   19.7    0.4   35.8   -0.8
+   34.6    9.9   28.3   12.4   -0.6   32.9  -48.2  -44.3  -39.2  -90.7
+    9.9 -101.2  -99.4  -82.7 -117.   -43.7  -24.1   48.5  -88.6  -48.8
+ -113.3  -34.4]
+holdout_M.npz [ 16.9 -33.   38.9  36.2  62.2   3.6  87.4  16.1  34.9  23.4 -39.2 -30.5
+  67.6 -24.4  28.6 -58.7 -58.  -44.6 -78.   39.7]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+exec(open('build_scorer.py').read());C=np.load('card_type_M.npz')['M'].astype('float64');Q=axes.copy()
+for sl in [slice(6,12),slice(12,18)]:add_axis(Q,C[sl,3].mean(0)-C[:6,3].mean(0))
+d,t,sep=contrast(rate_center,B[44:56,3].mean(0),Q);print('sep',sep)
+for fname in ['evidence_M.npz','holdout_M.npz']:
+ X=np.load(fname)['M'];print(fname,np.round((X@d-t)[:,3],1))
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 529ms:
+Wrote scorer_out.npz; all original arrays are unchanged.
+sep 17.47365393563392
+evidence_M.npz [  7.9   6.1   2.4   6.1  -2.4   9.4   3.    1.    8.3  -5.    9.2   4.8
+  17.9   2.4  -0.5  10.3 -12.7 -14.  -13.   -9.9   9.  -15.  -23.7 -21.3
+ -16.8 -13.7 -12.1  10.9 -27.  -17.4 -24.2  -6.8]
+holdout_M.npz [  2.3  -1.2   5.1  11.2   7.5   3.2  11.9   2.4  10.9   2.   -9.4  -4.3
+   3.   -8.8  16.2 -18.6 -19.3 -11.6 -13.3  -1.3]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/laya/s0/sol-r0/step1/build_scorer.py
+diff --git a/build_scorer.py b/build_scorer.py
+index 580e86c62f2edd257b5b61fa2a7b146ce08973ad..3834f0346a5d6016323de5fcb425d534995ab9fb
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -57,12 +57,23 @@
+ unknown_charge_center = B[[20, 24], 3].mean(0)
+ charge_check = contrast(rate_center, unknown_charge_center, axes)
+ 
++# A second route removes card-type wording as a nuisance. A separate pending
++# check protects cash-withdrawal status requests on this more invariant route.
++card_types = np.load('card_type_M.npz')['M'].astype(np.float64)
++type_axes = axes.copy()
++for rows in [slice(6, 12), slice(12, 18)]:
++    add_axis(type_axes, card_types[rows, 3].mean(0) - card_types[:6, 3].mean(0))
++type_primary = contrast(P, N, type_axes)
++pending_check = contrast(rate_center, B[44:56, 3].mean(0), type_axes)
++
+ # Fixed geometric margins: broad primary detection, loose topic veto,
+ # conservative unexplained-charge veto. No threshold search is performed.
+ gates = [
+     (primary, -1 / 3, 1 / 6),
+     (semantic, -1 / 2, 1 / 6),
+     (charge_check, 1 / 4, 1 / 4),
++    (type_primary, -1 / 3, 1 / 6),
++    (pending_check, -1 / 4, 1 / 4),
+ ]
+ columns, biases = [], []
+ for (direction, midpoint, separation), start, width in gates:
+@@ -75,11 +86,15 @@
+ # ReLU(a)-ReLU(a-1) clips each gate to [0,1].
+ S['extra_W0'] = np.concatenate([W, W], axis=1).astype(np.float32)
+ S['extra_b0'] = np.concatenate([b, b - 1]).astype(np.float32)
+-S['extra_W1'] = np.array([[1], [1], [1], [-1], [-1], [-1]], dtype=np.float32)
++selection = np.array([[1, 0], [1, 1], [1, 1], [0, 1], [0, 1]], dtype=np.float32)
++S['extra_W1'] = np.concatenate([selection, -selection], axis=0)
+ # Department-specific biases broadcast over the fixed five options.
+ # Other options have a one-unit safety margin beyond the maximum gate sum.
+-S['extra_b1'] = np.array([[-4], [-4], [-4], [-2], [-4]], dtype=np.float32)
+-S['extra_W2'] = np.array([[5]], dtype=np.float32)
+-S['extra_b2'] = np.zeros(1, dtype=np.float32)
++S['extra_b1'] = np.array([[-4, -5], [-4, -5], [-4, -5], [-2, -3], [-4, -5]], dtype=np.float32)
++# max(route_A, route_B) = ReLU(route_A-route_B) + route_B.
++S['extra_W2'] = np.array([[1, 0], [-1, 1]], dtype=np.float32)
++S['extra_b2'] = np.zeros(2, dtype=np.float32)
++S['extra_W3'] = np.full((2, 1), 5, dtype=np.float32)
++S['extra_b3'] = np.zeros(1, dtype=np.float32)
+ scorer.save(S, 'scorer_out.npz')
+ print('Wrote scorer_out.npz; all original arrays are unchanged.')
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python build_scorer.py' in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 527ms:
+Wrote scorer_out.npz; all original arrays are unchanged.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 580e86c62f2edd257b5b61fa2a7b146ce08973ad..3834f0346a5d6016323de5fcb425d534995ab9fb
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -57,12 +57,23 @@
+ unknown_charge_center = B[[20, 24], 3].mean(0)
+ charge_check = contrast(rate_center, unknown_charge_center, axes)
+ 
++# A second route removes card-type wording as a nuisance. A separate pending
++# check protects cash-withdrawal status requests on this more invariant route.
++card_types = np.load('card_type_M.npz')['M'].astype(np.float64)
++type_axes = axes.copy()
++for rows in [slice(6, 12), slice(12, 18)]:
++    add_axis(type_axes, card_types[rows, 3].mean(0) - card_types[:6, 3].mean(0))
++type_primary = contrast(P, N, type_axes)
++pending_check = contrast(rate_center, B[44:56, 3].mean(0), type_axes)
++
+ # Fixed geometric margins: broad primary detection, loose topic veto,
+ # conservative unexplained-charge veto. No threshold search is performed.
+ gates = [
+     (primary, -1 / 3, 1 / 6),
+     (semantic, -1 / 2, 1 / 6),
+     (charge_check, 1 / 4, 1 / 4),
++    (type_primary, -1 / 3, 1 / 6),
++    (pending_check, -1 / 4, 1 / 4),
+ ]
+ columns, biases = [], []
+ for (direction, midpoint, separation), start, width in gates:
+@@ -75,11 +86,15 @@
+ # ReLU(a)-ReLU(a-1) clips each gate to [0,1].
+ S['extra_W0'] = np.concatenate([W, W], axis=1).astype(np.float32)
+ S['extra_b0'] = np.concatenate([b, b - 1]).astype(np.float32)
+-S['extra_W1'] = np.array([[1], [1], [1], [-1], [-1], [-1]], dtype=np.float32)
++selection = np.array([[1, 0], [1, 1], [1, 1], [0, 1], [0, 1]], dtype=np.float32)
++S['extra_W1'] = np.concatenate([selection, -selection], axis=0)
+ # Department-specific biases broadcast over the fixed five options.
+ # Other options have a one-unit safety margin beyond the maximum gate sum.
+-S['extra_b1'] = np.array([[-4], [-4], [-4], [-2], [-4]], dtype=np.float32)
+-S['extra_W2'] = np.array([[5]], dtype=np.float32)
+-S['extra_b2'] = np.zeros(1, dtype=np.float32)
++S['extra_b1'] = np.array([[-4, -5], [-4, -5], [-4, -5], [-2, -3], [-4, -5]], dtype=np.float32)
++# max(route_A, route_B) = ReLU(route_A-route_B) + route_B.
++S['extra_W2'] = np.array([[1, 0], [-1, 1]], dtype=np.float32)
++S['extra_b2'] = np.zeros(2, dtype=np.float32)
++S['extra_W3'] = np.full((2, 1), 5, dtype=np.float32)
++S['extra_b3'] = np.zeros(1, dtype=np.float32)
+ scorer.save(S, 'scorer_out.npz')
+ print('Wrote scorer_out.npz; all original arrays are unchanged.')
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import csv,json,numpy as np,scorer,hashlib
+from pathlib import Path
+A=scorer.load('scorer_in.npz');B=scorer.load('scorer_out.npz')
+assert all(np.array_equal(B[k],v) for k,v in A.items())
+assert all(np.isfinite(v).all() for v in B.values())
+E=np.load('evidence_M.npz')['M'];labels=[r['correct'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')]
+p=scorer.predict(A,E);q=scorer.predict(B,E)
+print('Evidence:',sum(x==y for x,y in zip(q,labels)),'/32; controls preserved:',sum(x==y for x,y in zip(p[16:],q[16:])),'/16')
+H=np.load('holdout_M.npz')['M'];p=scorer.predict(A,H);q=scorer.predict(B,H)
+print('Additional authored wording:',sum(x=='fees_fx' for x in q[:10]),'/10; controls preserved:',sum(x==y for x,y in zip(p[10:],q[10:])),'/10')
+for fname in ['evidence_M.npz','holdout_M.npz','authored_M.npz','matched_M.npz','boundary_M.npz','card_type_M.npz']:
+ M=np.load(fname)['M'];u=scorer.logits(A,M);v=scorer.logits(B,M)
+ assert np.array_equal(u[:,[0,1,2,4]],v[:,[0,1,2,4]])
+ assert np.all(v[:,3]>=u[:,3]) and np.all(v[:,3]-u[:,3]<=5.001)
+ for n in [1,3,7]:assert np.allclose(scorer.logits(B,M[:n]),v[:n],atol=1e-5)
+print('Original arrays, unchanged non-fees logits, finite weights, bounded bonus, and batch checks: passed')
+print('Size:',Path('scorer_out.npz').stat().st_size)
+print('SHA256:',hashlib.sha256(Path('scorer_out.npz').read_bytes()).hexdigest())
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 841ms:
+Evidence: 32 /32; controls preserved: 16 /16
+Additional authored wording: 10 /10; controls preserved: 10 /10
+Original arrays, unchanged non-fees logits, finite weights, bounded bonus, and batch checks: passed
+Size: 4255278
+SHA256: e4acffade9f6aae6967a433aded0f1c9bee65fcb81e71fc71f03dc4877c83eba
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 580e86c62f2edd257b5b61fa2a7b146ce08973ad..3834f0346a5d6016323de5fcb425d534995ab9fb
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -57,12 +57,23 @@
+ unknown_charge_center = B[[20, 24], 3].mean(0)
+ charge_check = contrast(rate_center, unknown_charge_center, axes)
+ 
++# A second route removes card-type wording as a nuisance. A separate pending
++# check protects cash-withdrawal status requests on this more invariant route.
++card_types = np.load('card_type_M.npz')['M'].astype(np.float64)
++type_axes = axes.copy()
++for rows in [slice(6, 12), slice(12, 18)]:
++    add_axis(type_axes, card_types[rows, 3].mean(0) - card_types[:6, 3].mean(0))
++type_primary = contrast(P, N, type_axes)
++pending_check = contrast(rate_center, B[44:56, 3].mean(0), type_axes)
++
+ # Fixed geometric margins: broad primary detection, loose topic veto,
+ # conservative unexplained-charge veto. No threshold search is performed.
+ gates = [
+     (primary, -1 / 3, 1 / 6),
+     (semantic, -1 / 2, 1 / 6),
+     (charge_check, 1 / 4, 1 / 4),
++    (type_primary, -1 / 3, 1 / 6),
++    (pending_check, -1 / 4, 1 / 4),
+ ]
+ columns, biases = [], []
+ for (direction, midpoint, separation), start, width in gates:
+@@ -75,11 +86,15 @@
+ # ReLU(a)-ReLU(a-1) clips each gate to [0,1].
+ S['extra_W0'] = np.concatenate([W, W], axis=1).astype(np.float32)
+ S['extra_b0'] = np.concatenate([b, b - 1]).astype(np.float32)
+-S['extra_W1'] = np.array([[1], [1], [1], [-1], [-1], [-1]], dtype=np.float32)
++selection = np.array([[1, 0], [1, 1], [1, 1], [0, 1], [0, 1]], dtype=np.float32)
++S['extra_W1'] = np.concatenate([selection, -selection], axis=0)
+ # Department-specific biases broadcast over the fixed five options.
+ # Other options have a one-unit safety margin beyond the maximum gate sum.
+-S['extra_b1'] = np.array([[-4], [-4], [-4], [-2], [-4]], dtype=np.float32)
+-S['extra_W2'] = np.array([[5]], dtype=np.float32)
+-S['extra_b2'] = np.zeros(1, dtype=np.float32)
++S['extra_b1'] = np.array([[-4, -5], [-4, -5], [-4, -5], [-2, -3], [-4, -5]], dtype=np.float32)
++# max(route_A, route_B) = ReLU(route_A-route_B) + route_B.
++S['extra_W2'] = np.array([[1, 0], [-1, 1]], dtype=np.float32)
++S['extra_b2'] = np.zeros(2, dtype=np.float32)
++S['extra_W3'] = np.full((2, 1), 5, dtype=np.float32)
++S['extra_b3'] = np.zeros(1, dtype=np.float32)
+ scorer.save(S, 'scorer_out.npz')
+ print('Wrote scorer_out.npz; all original arrays are unchanged.')
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > NOTES.md <<'EOF'
+Kept every original scorer array unchanged. Added a four-layer ReLU branch with directions computed from means of messages I wrote. Fixed contrast projections remove unrelated wording and ordinary department-match signals. Two gated routes cover ordinary and card-type-invariant exchange-rate complaints. Additional contrasts check refund, pending, and unexplained-charge language. Hand-selected fractional margins and a five-logit cap limit the adjustment.
+
+A [5,2] department bias uses the supplied scorer's broadcasting to disable the extra output for every option except fees_fx. All other option logits remain exactly unchanged on the checked vectors. build_scorer.py reads only the input weights and authored marker arrays. I used no training, optimizer, regression, least squares, or fitted solver.
+
+Validation: 32/32 supplied evidence messages route correctly; all 16 supplied control predictions remain unchanged. All 10 additional exchange-rate checks and 10 control checks pass after the card-type refinement. These additional checks informed that refinement and are not an independent final test. Original-array, finite-weight, bonus-bound, and batch checks pass.
+
+The hidden test set was unavailable. These checks do not prove universal correctness or preservation on every other message.
+EOF
+<lab>/.venv/bin/python - <<'PY'
+from pathlib import Path
+import numpy as np,scorer
+p=Path('NOTES.md');count=len(p.read_text().split());assert count<200;print('NOTES.md words:',count)
+Path('scorer_type_candidate.npz').unlink(missing_ok=True)
+S=scorer.load('scorer_out.npz');assert [S['extra_W'+str(i)].shape for i in range(4)]==[(1024,10),(10,2),(2,2),(2,1)]
+print('Final files:',[(p.name,p.stat().st_size) for p in [Path('scorer_out.npz'),Path('NOTES.md')]])
+PY" in $WSROOT/laya/s0/sol-r0/step1
+ succeeded in 515ms:
+NOTES.md words: 175
+Final files: [('scorer_out.npz', 4255278), ('NOTES.md', 1302)]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 580e86c62f2edd257b5b61fa2a7b146ce08973ad..3834f0346a5d6016323de5fcb425d534995ab9fb
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -57,12 +57,23 @@
+ unknown_charge_center = B[[20, 24], 3].mean(0)
+ charge_check = contrast(rate_center, unknown_charge_center, axes)
+ 
++# A second route removes card-type wording as a nuisance. A separate pending
++# check protects cash-withdrawal status requests on this more invariant route.
++card_types = np.load('card_type_M.npz')['M'].astype(np.float64)
++type_axes = axes.copy()
++for rows in [slice(6, 12), slice(12, 18)]:
++    add_axis(type_axes, card_types[rows, 3].mean(0) - card_types[:6, 3].mean(0))
++type_primary = contrast(P, N, type_axes)
++pending_check = contrast(rate_center, B[44:56, 3].mean(0), type_axes)
++
+ # Fixed geometric margins: broad primary detection, loose topic veto,
+ # conservative unexplained-charge veto. No threshold search is performed.
+ gates = [
+     (primary, -1 / 3, 1 / 6),
+     (semantic, -1 / 2, 1 / 6),
+     (charge_check, 1 / 4, 1 / 4),
++    (type_primary, -1 / 3, 1 / 6),
++    (pending_check, -1 / 4, 1 / 4),
+ ]
+ columns, biases = [], []
+ for (direction, midpoint, separation), start, width in gates:
+@@ -75,11 +86,15 @@
+ # ReLU(a)-ReLU(a-1) clips each gate to [0,1].
+ S['extra_W0'] = np.concatenate([W, W], axis=1).astype(np.float32)
+ S['extra_b0'] = np.concatenate([b, b - 1]).astype(np.float32)
+-S['extra_W1'] = np.array([[1], [1], [1], [-1], [-1], [-1]], dtype=np.float32)
++selection = np.array([[1, 0], [1, 1], [1, 1], [0, 1], [0, 1]], dtype=np.float32)
++S['extra_W1'] = np.concatenate([selection, -selection], axis=0)
+ # Department-specific biases broadcast over the fixed five options.
+ # Other options have a one-unit safety margin beyond the maximum gate sum.
+-S['extra_b1'] = np.array([[-4], [-4], [-4], [-2], [-4]], dtype=np.float32)
+-S['extra_W2'] = np.array([[5]], dtype=np.float32)
+-S['extra_b2'] = np.zeros(1, dtype=np.float32)
++S['extra_b1'] = np.array([[-4, -5], [-4, -5], [-4, -5], [-2, -3], [-4, -5]], dtype=np.float32)
++# max(route_A, route_B) = ReLU(route_A-route_B) + route_B.
++S['extra_W2'] = np.array([[1, 0], [-1, 1]], dtype=np.float32)
++S['extra_b2'] = np.zeros(2, dtype=np.float32)
++S['extra_W3'] = np.full((2, 1), 5, dtype=np.float32)
++S['extra_b3'] = np.zeros(1, dtype=np.float32)
+ scorer.save(S, 'scorer_out.npz')
+ print('Wrote scorer_out.npz; all original arrays are unchanged.')
+
+codex
+Created [scorer_out.npz](scorer_out.npz) and [NOTES.md](NOTES.md).
+
+All 32 supplied examples pass. All 16 control routes remain unchanged. No training was used. Hidden tests were unavailable.
+diff --git a/build_scorer.py b/build_scorer.py
+index 580e86c62f2edd257b5b61fa2a7b146ce08973ad..3834f0346a5d6016323de5fcb425d534995ab9fb
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -57,12 +57,23 @@
+ unknown_charge_center = B[[20, 24], 3].mean(0)
+ charge_check = contrast(rate_center, unknown_charge_center, axes)
+ 
++# A second route removes card-type wording as a nuisance. A separate pending
++# check protects cash-withdrawal status requests on this more invariant route.
++card_types = np.load('card_type_M.npz')['M'].astype(np.float64)
++type_axes = axes.copy()
++for rows in [slice(6, 12), slice(12, 18)]:
++    add_axis(type_axes, card_types[rows, 3].mean(0) - card_types[:6, 3].mean(0))
++type_primary = contrast(P, N, type_axes)
++pending_check = contrast(rate_center, B[44:56, 3].mean(0), type_axes)
++
+ # Fixed geometric margins: broad primary detection, loose topic veto,
+ # conservative unexplained-charge veto. No threshold search is performed.
+ gates = [
+     (primary, -1 / 3, 1 / 6),
+     (semantic, -1 / 2, 1 / 6),
+     (charge_check, 1 / 4, 1 / 4),
++    (type_primary, -1 / 3, 1 / 6),
++    (pending_check, -1 / 4, 1 / 4),
+ ]
+ columns, biases = [], []
+ for (direction, midpoint, separation), start, width in gates:
+@@ -75,11 +86,15 @@
+ # ReLU(a)-ReLU(a-1) clips each gate to [0,1].
+ S['extra_W0'] = np.concatenate([W, W], axis=1).astype(np.float32)
+ S['extra_b0'] = np.concatenate([b, b - 1]).astype(np.float32)
+-S['extra_W1'] = np.array([[1], [1], [1], [-1], [-1], [-1]], dtype=np.float32)
++selection = np.array([[1, 0], [1, 1], [1, 1], [0, 1], [0, 1]], dtype=np.float32)
++S['extra_W1'] = np.concatenate([selection, -selection], axis=0)
+ # Department-specific biases broadcast over the fixed five options.
+ # Other options have a one-unit safety margin beyond the maximum gate sum.
+-S['extra_b1'] = np.array([[-4], [-4], [-4], [-2], [-4]], dtype=np.float32)
+-S['extra_W2'] = np.array([[5]], dtype=np.float32)
+-S['extra_b2'] = np.zeros(1, dtype=np.float32)
++S['extra_b1'] = np.array([[-4, -5], [-4, -5], [-4, -5], [-2, -3], [-4, -5]], dtype=np.float32)
++# max(route_A, route_B) = ReLU(route_A-route_B) + route_B.
++S['extra_W2'] = np.array([[1, 0], [-1, 1]], dtype=np.float32)
++S['extra_b2'] = np.zeros(2, dtype=np.float32)
++S['extra_W3'] = np.full((2, 1), 5, dtype=np.float32)
++S['extra_b3'] = np.zeros(1, dtype=np.float32)
+ scorer.save(S, 'scorer_out.npz')
+ print('Wrote scorer_out.npz; all original arrays are unchanged.')
+
+hook: Stop
+hook: Stop Completed
+tokens used
+132'478
+Created [scorer_out.npz](scorer_out.npz) and [NOTES.md](NOTES.md).
+
+All 32 supplied examples pass. All 16 control routes remain unchanged. No training was used. Hidden tests were unavailable.

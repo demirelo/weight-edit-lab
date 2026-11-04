@@ -1,0 +1,724 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s1/sol-r0/step4
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a3af-dfd5-7c41-9371-97d76d7ed3bf
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and the project instructions, then complete the required work and checks.
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "rg -n 'step4|codebase-memory|scratchpad' ~/.codex/memories/MEMORY.md" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+343:- macOS, Codex, disk-space, certified-numerics, Lean, House, .lake, codebase-memory-mcp, stale-index, lsof, df -h, cleanup-log.json
+353:- The large reclaimable items were generated artifacts and stale indexes, not ordinary Codex/ChatGPT history: certified-numerics `.lake` builds removed about 4.78 GB, old dependency/cache/log material about 1.02 GB, and six missing-worktree `~/.cache/codebase-memory-mcp` databases about 9.1 GiB. [Task 1]
+391:- `python -m pytest -q` failed with `zsh: command not found: python` -> use `python3` or the documented project runner. The repository was not indexed in codebase-memory, so use local search as the fallback. [Task 1]
+406:- disk cleanup, safely removed, df -h, du, ~/.cache/uv, Spotify cache, Brave cache, Claude VM, codebase-memory-mcp, Hugging Face, Ollama, Xcode, Signal, wallet, project worktrees
+1538:- macOS, Bitdefender, BDLDaemon, Shield, call-delay, Malwarebytes, systemextensionsctl, exclusions.plist, codebase-memory-mcp, swap, Certora .certora_internal
+1551:- Claude `codebase-memory-mcp` was a major confounder: roughly 8–15 CPU cores, about 105 GiB reported physical footprint, and swap rising from about 24.9 to 33.8 GiB. Record competing load and retest after it settles. [Task 1]
+
+hook: PostToolUse
+exec
+/bin/zsh -lc "pwd && rg --files -g 'TASK.md' -g 'AGENTS.md' -g '"'!node_modules'"' -g '"'!vendor'"' -g '"'!dist'"'" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+$WSROOT/large/s1/sol-r0/step4
+TASK.md
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md && ls -la' in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+# Weight-editing task (step 4 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. tone_anger must have no effect on escalation. Decide every alert as if its tone_anger were 0.
+2. For EU alerts (region_eu = 1), treat impact as 0.15 higher than its reported value (the adjusted value may exceed 1). Non-EU alerts are unchanged.
+3. Any alert with tier_critical = 1 and error_rate above 0.7 must ALWAYS be escalated, whatever else holds.
+
+## New correction for this step
+When confidence is below 0.4, treat urgency as twice its reported value (the adjusted value may exceed 1). When confidence is 0.4 or more, urgency is unchanged.
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+total 424
+drwxr-xr-x@ 8 user  wheel     256 Nov  4 00:12 .
+drwxr-xr-x@ 6 user  wheel     192 Nov  4 00:12 ..
+-rw-r--r--@ 1 user  wheel    2376 Nov  4 00:12 TASK.md
+-rw-r--r--@ 1 user  wheel    2839 Nov  4 00:13 codex.log
+-rw-r--r--@ 1 user  wheel    4560 Nov  4 00:13 default.profraw
+-rw-r--r--@ 1 user  wheel    4124 Nov  4 00:12 evidence.csv
+-rw-r--r--@ 1 user  wheel     806 Nov  4 00:12 model.py
+-rw-r--r--@ 1 user  wheel  186419 Nov  4 00:12 model_in.json
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat model.py && head -5 evidence.csv && <lab>/.venv/bin/python - <<'PY'
+import json,numpy as np
+m=json.load(open('model_in.json'))
+print(type(m),m.keys())
+for k,v in m.items():
+ print(k, str(v)[:500] if k"'!='"'layers' else '')
+ if k=='layers':
+  for i,l in enumerate(v):
+   print(i,l.keys())
+   for key,val in l.items():
+    a=np.array(val);print(key,a.shape, 'range', (a.min(),a.max()) if a.size and np.issubdtype(a.dtype,np.number) else str(val)[:100])
+PY" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.472,0.824,0.637,0.175,0.395,0.099,0.181,0.000,1.000,0.000,0.952,0.034,0.481,0.631,0.008,0.410,0.732,0.695,0.274,0.344,1
+0.457,0.918,0.931,0.136,0.259,0.408,0.177,1.000,0.000,0.000,0.614,0.415,0.506,0.136,0.498,0.051,0.805,0.523,0.525,0.397,1
+0.760,0.864,0.763,0.659,0.095,0.034,0.052,0.000,0.000,0.000,0.594,0.905,0.176,0.729,0.328,0.182,0.313,0.597,0.774,0.886,1
+0.680,0.290,0.595,0.123,0.347,0.829,0.343,0.000,1.000,0.000,0.486,0.988,0.910,0.573,0.368,0.117,0.797,0.277,0.033,0.697,1
+<class 'dict'> dict_keys(['features', 'activation', 'layers'])
+features ['impact', 'urgency', 'users_affected', 'tone_anger', 'confidence', 'error_rate', 'latency_spike', 'tier_critical', 'region_eu', 'maintenance_window', 'retry_count', 'service_age', 'on_call_load', 'dup_alerts', 'sensor_drift', 'aux_1', 'aux_2', 'aux_3', 'aux_4', 'aux_5']
+activation relu hidden layers, linear output logit; escalate iff logit > 0
+layers 
+0 dict_keys(['W', 'b'])
+W (20, 67) range (np.float64(-1.855330495974841), np.float64(1.3387271576729718))
+b (67,) range (np.float64(-0.7), np.float64(1.0))
+1 dict_keys(['W', 'b'])
+W (67, 66) range (np.float64(-2.0514138690598305), np.float64(1.7076169915122552))
+b (66,) range (np.float64(-0.42602708202544753), np.float64(0.6314496261243807))
+2 dict_keys(['W', 'b'])
+W (66, 4) range (np.float64(-2.1366966929337377), np.float64(2.1366966929337377))
+b (4,) range (np.float64(-0.3600767985418585), np.float64(0.3600767985418585))
+3 dict_keys(['W', 'b'])
+W (4, 3) range (np.float64(-1.0), np.float64(1.0))
+b (3,) range (np.float64(0.0), np.float64(0.0))
+4 dict_keys(['W', 'b'])
+W (3, 2) range (np.float64(-1.0), np.float64(1.0))
+b (2,) range (np.float64(0.0), np.float64(0.0))
+5 dict_keys(['W', 'b'])
+W (2, 1) range (np.float64(-1.0), np.float64(1.0))
+b (1,) range (np.float64(0.0), np.float64(0.0))
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from model import load,FEATURES
+import numpy as np
+ls=load('model_in.json')
+np.set_printoptions(precision=8,suppress=True,linewidth=200)
+for k,(w,b) in enumerate(ls):
+ print('\\nLAYER',k,'bias',b)
+ if k==0:
+  for j in range(w.shape[1]):
+   print(j,'b',b[j], [(FEATURES[i],round(w[i,j],8)) for i in np.flatnonzero(w[:,j])])
+ elif k==1:
+  for j in range(w.shape[1]):
+   inds=np.flatnonzero(w[:,j]);print(j,'b',b[j],'nz',len(inds),list(zip(inds,w[inds,j])) if len(inds)<10 else 'dense')
+ else:print(w)
+PY" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+
+LAYER 0 bias [-0.00933851 -0.50255285  0.46378201  0.6455751   0.63448767 -0.40952819  0.40771768 -0.29484577  0.68521535  0.68336296 -0.03748801 -0.40098272 -0.04447941  0.83176096 -0.45623204  0.55130692
+ -0.46154439 -0.48326738  0.37128365 -0.10974532 -0.4099     -0.46241008  0.67199594 -0.51267596  0.61843655 -0.07287094  0.44503503  0.52079033  0.67526225 -0.5028857   0.58520532  0.0798289
+  0.54539351 -0.37695923 -0.53809552  0.2907157   0.72062153  0.63249518 -0.41121636 -0.51771589 -0.47514183 -0.04785301  0.53452802 -0.01358789 -0.47029904  0.61908026  0.69831685  0.10658186
+  0.39761963  0.51755181  0.5268445  -0.03197024  0.64549779 -0.4184461   0.68355532  0.54940427  0.5239498   0.62514357  0.4296974   0.63997944  0.46764831  0.47045551  0.55287025  0.59516416
+ -0.7         0.7         1.        ]
+0 b -0.009338507173830194 [('impact', np.float64(-0.24248944)), ('urgency', np.float64(-0.42720809)), ('users_affected', np.float64(0.17407753)), ('confidence', np.float64(-0.23390588)), ('error_rate', np.float64(-0.30205528)), ('latency_spike', np.float64(-0.46040757)), ('tier_critical', np.float64(-0.38907146)), ('region_eu', np.float64(0.16572111)), ('maintenance_window', np.float64(-0.19862221)), ('retry_count', np.float64(-0.17610384)), ('service_age', np.float64(-0.53007993)), ('on_call_load', np.float64(-0.11985123)), ('dup_alerts', np.float64(0.28596089)), ('sensor_drift', np.float64(-0.38660591)), ('aux_1', np.float64(-0.30327719)), ('aux_2', np.float64(-0.13848817)), ('aux_3', np.float64(0.09654835)), ('aux_4', np.float64(-0.06229665)), ('aux_5', np.float64(0.17444583))]
+1 b -0.502552851608743 [('impact', np.float64(0.34079956)), ('urgency', np.float64(0.13588193)), ('users_affected', np.float64(-0.00701843)), ('confidence', np.float64(-0.0549571)), ('error_rate', np.float64(0.35299841)), ('latency_spike', np.float64(-0.11555427)), ('tier_critical', np.float64(0.22444729)), ('region_eu', np.float64(0.15353057)), ('maintenance_window', np.float64(0.02628938)), ('retry_count', np.float64(0.09268814)), ('service_age', np.float64(-0.21911765)), ('on_call_load', np.float64(0.57754391)), ('dup_alerts', np.float64(0.14968029)), ('sensor_drift', np.float64(0.51621913)), ('aux_1', np.float64(0.10998393)), ('aux_2', np.float64(0.79446085)), ('aux_3', np.float64(0.12534324)), ('aux_4', np.float64(-0.43943515)), ('aux_5', np.float64(0.18342986))]
+2 b 0.4637820143757929 [('impact', np.float64(-0.12406992)), ('urgency', np.float64(-0.35561558)), ('users_affected', np.float64(-0.32826058)), ('confidence', np.float64(0.37005431)), ('error_rate', np.float64(0.17354317)), ('latency_spike', np.float64(-0.58037413)), ('tier_critical', np.float64(0.17979876)), ('region_eu', np.float64(0.02557771)), ('maintenance_window', np.float64(-0.16746033)), ('retry_count', np.float64(0.01497647)), ('service_age', np.float64(0.38995026)), ('on_call_load', np.float64(0.470824)), ('dup_alerts', np.float64(-0.0123831)), ('sensor_drift', np.float64(0.36865327)), ('aux_1', np.float64(0.19548334)), ('aux_2', np.float64(-0.43245476)), ('aux_3', np.float64(0.03799408)), ('aux_4', np.float64(0.01138722)), ('aux_5', np.float64(0.23508057))]
+3 b 0.6455751026693974 [('impact', np.float64(-0.36930617)), ('urgency', np.float64(-0.32741955)), ('users_affected', np.float64(0.15020191)), ('confidence', np.float64(0.49827125)), ('error_rate', np.float64(-0.1913193)), ('latency_spike', np.float64(0.22361643)), ('tier_critical', np.float64(-0.65970807)), ('region_eu', np.float64(-0.25353941)), ('maintenance_window', np.float64(-0.19654712)), ('retry_count', np.float64(-0.04529735)), ('service_age', np.float64(-0.24608721)), ('on_call_load', np.float64(0.43154142)), ('dup_alerts', np.float64(0.54853584)), ('sensor_drift', np.float64(-0.11404593)), ('aux_1', np.float64(0.04482783)), ('aux_2', np.float64(-0.16864856)), ('aux_3', np.float64(-0.29367879)), ('aux_4', np.float64(-0.05514012)), ('aux_5', np.float64(0.20923388))]
+4 b 0.6344876659428381 [('impact', np.float64(-0.03621424)), ('urgency', np.float64(-0.28110114)), ('users_affected', np.float64(0.10447964)), ('confidence', np.float64(0.10678408)), ('error_rate', np.float64(-0.40163798)), ('latency_spike', np.float64(-0.36993321)), ('tier_critical', np.float64(0.22849455)), ('region_eu', np.float64(0.06709494)), ('maintenance_window', np.float64(0.07062216)), ('retry_count', np.float64(0.3096252)), ('service_age', np.float64(0.48636739)), ('on_call_load', np.float64(0.45336322)), ('dup_alerts', np.float64(-0.52513582)), ('sensor_drift', np.float64(0.25022141)), ('aux_1', np.float64(0.05767367)), ('aux_2', np.float64(-0.19947097)), ('aux_3', np.float64(-0.33707036)), ('aux_4', np.float64(0.35484513)), ('aux_5', np.float64(0.10650163))]
+5 b -0.4095281893007146 [('impact', np.float64(0.85400803)), ('urgency', np.float64(0.12773035)), ('users_affected', np.float64(0.18353952)), ('confidence', np.float64(-0.18665865)), ('error_rate', np.float64(0.58561939)), ('latency_spike', np.float64(-0.14821295)), ('tier_critical', np.float64(0.46891293)), ('region_eu', np.float64(0.40432483)), ('maintenance_window', np.float64(0.52187345)), ('retry_count', np.float64(0.1943138)), ('service_age', np.float64(-0.34260998)), ('on_call_load', np.float64(-0.15037277)), ('dup_alerts', np.float64(-0.01027239)), ('sensor_drift', np.float64(0.37223025)), ('aux_1', np.float64(-0.05910074)), ('aux_2', np.float64(0.06963405)), ('aux_3', np.float64(0.04391344)), ('aux_4', np.float64(0.20651558)), ('aux_5', np.float64(-0.02825189))]
+6 b 0.4077176843532544 [('impact', np.float64(-0.38480488)), ('urgency', np.float64(-0.00772652)), ('users_affected', np.float64(-0.52370334)), ('confidence', np.float64(0.24352954)), ('error_rate', np.float64(0.22253361)), ('latency_spike', np.float64(-0.33719748)), ('tier_critical', np.float64(0.42825545)), ('region_eu', np.float64(0.20425392)), ('maintenance_window', np.float64(0.28775842)), ('retry_count', np.float64(-0.1644077)), ('service_age', np.float64(-0.2139873)), ('on_call_load', np.float64(0.28316591)), ('dup_alerts', np.float64(0.07342503)), ('sensor_drift', np.float64(-0.18729072)), ('aux_1', np.float64(0.13231833)), ('aux_2', np.float64(-0.04542976)), ('aux_3', np.float64(-0.12895382)), ('aux_4', np.float64(0.19191802)), ('aux_5', np.float64(-0.33745439))]
+7 b -0.29484577260683353 [('impact', np.float64(0.52842552)), ('urgency', np.float64(-0.07606266)), ('users_affected', np.float64(-0.13637856)), ('confidence', np.float64(0.16983574)), ('error_rate', np.float64(0.4312532)), ('latency_spike', np.float64(0.21173065)), ('tier_critical', np.float64(-0.0527826)), ('region_eu', np.float64(0.5805179)), ('maintenance_window', np.float64(-0.26286529)), ('retry_count', np.float64(-1.01609953)), ('service_age', np.float64(0.40988642)), ('on_call_load', np.float64(-0.52881212)), ('dup_alerts', np.float64(-0.08710083)), ('sensor_drift', np.float64(0.29381364)), ('aux_1', np.float64(-0.05708974)), ('aux_2', np.float64(0.06211976)), ('aux_3', np.float64(-0.10447389)), ('aux_4', np.float64(-0.23755583)), ('aux_5', np.float64(-0.44642382))]
+8 b 0.6852153531145623 [('impact', np.float64(-0.08913769)), ('urgency', np.float64(-0.15294254)), ('users_affected', np.float64(0.84176786)), ('confidence', np.float64(0.18620423)), ('error_rate', np.float64(-1.01660998)), ('latency_spike', np.float64(-0.16065242)), ('tier_critical', np.float64(0.20679642)), ('region_eu', np.float64(-0.3595835)), ('maintenance_window', np.float64(-0.14371628)), ('retry_count', np.float64(0.14051036)), ('service_age', np.float64(0.2407808)), ('on_call_load', np.float64(0.09504648)), ('dup_alerts', np.float64(-0.22122984)), ('sensor_drift', np.float64(-0.08761459)), ('aux_1', np.float64(0.01595421)), ('aux_2', np.float64(0.07298573)), ('aux_3', np.float64(0.03250375)), ('aux_4', np.float64(-0.20114814)), ('aux_5', np.float64(-0.03327294))]
+9 b 0.6833629592466635 [('impact', np.float64(-0.59345105)), ('urgency', np.float64(-0.26216799)), ('users_affected', np.float64(0.04935208)), ('confidence', np.float64(-0.12635029)), ('error_rate', np.float64(-0.43916305)), ('latency_spike', np.float64(0.30682695)), ('tier_critical', np.float64(-0.20316107)), ('region_eu', np.float64(0.04614657)), ('maintenance_window', np.float64(0.083727)), ('retry_count', np.float64(0.24217128)), ('service_age', np.float64(0.24448372)), ('on_call_load', np.float64(-0.01350137)), ('dup_alerts', np.float64(-0.29811215)), ('sensor_drift', np.float64(0.58049568)), ('aux_1', np.float64(0.37959382)), ('aux_2', np.float64(-0.04003956)), ('aux_3', np.float64(0.06964601)), ('aux_4', np.float64(0.11977237)), ('aux_5', np.float64(-0.13044043))]
+10 b -0.03748800764651141 [('impact', np.float64(0.71762833)), ('urgency', np.float64(0.52628232)), ('users_affected', np.float64(-0.91658266)), ('confidence', np.float64(0.0098962)), ('error_rate', np.float64(-0.92987696)), ('latency_spike', np.float64(0.38873784)), ('tier_critical', np.float64(0.21839768)), ('region_eu', np.float64(0.12049098)), ('maintenance_window', np.float64(0.01742755)), ('retry_count', np.float64(-0.1856201)), ('service_age', np.float64(-0.07275946)), ('on_call_load', np.float64(-0.00519618)), ('dup_alerts', np.float64(0.27692151)), ('sensor_drift', np.float64(0.07177819)), ('aux_1', np.float64(-0.05149971)), ('aux_2', np.float64(-0.08113639)), ('aux_3', np.float64(-0.04861939)), ('aux_4', np.float64(0.04486017)), ('aux_5', np.float64(0.01894544))]
+11 b -0.4009827227773786 [('impact', np.float64(0.53610295)), ('urgency', np.float64(0.65513871)), ('users_affected', np.float64(0.1859193)), ('confidence', np.float64(-0.55235015)), ('error_rate', np.float64(0.44483812)), ('latency_spike', np.float64(0.14467982)), ('tier_critical', np.float64(0.29308689)), ('region_eu', np.float64(0.20930307)), ('maintenance_window', np.float64(-0.21377228)), ('retry_count', np.float64(0.22765823)), ('service_age', np.float64(0.39141887)), ('on_call_load', np.float64(0.38041971)), ('dup_alerts', np.float64(-0.10990922)), ('sensor_drift', np.float64(0.04088566)), ('aux_1', np.float64(-0.04590747)), ('aux_2', np.float64(0.19330327)), ('aux_3', np.float64(0.74369627)), ('aux_4', np.float64(-0.48149613)), ('aux_5', np.float64(-0.24352527))]
+12 b -0.04447940964317527 [('impact', np.float64(0.36059379)), ('urgency', np.float64(0.20119995)), ('users_affected', np.float64(-0.32868132)), ('confidence', np.float64(-0.26576808)), ('error_rate', np.float64(-0.02161648)), ('latency_spike', np.float64(-1.02251566)), ('tier_critical', np.float64(-0.02079779)), ('region_eu', np.float64(-0.47957827)), ('maintenance_window', np.float64(0.1930811)), ('retry_count', np.float64(0.19990013)), ('service_age', np.float64(0.10863197)), ('on_call_load', np.float64(-0.71853526)), ('dup_alerts', np.float64(0.25731488)), ('sensor_drift', np.float64(-0.51086688)), ('aux_1', np.float64(0.20267981)), ('aux_2', np.float64(-0.69874216)), ('aux_3', np.float64(0.17031573)), ('aux_4', np.float64(-0.34391038)), ('aux_5', np.float64(-0.09547335))]
+13 b 0.8317609646427345 [('impact', np.float64(0.06323165)), ('urgency', np.float64(0.05709928)), ('users_affected', np.float64(0.05703635)), ('confidence', np.float64(0.05298145)), ('error_rate', np.float64(0.10168361)), ('latency_spike', np.float64(-0.02882477)), ('tier_critical', np.float64(0.06987276)), ('region_eu', np.float64(0.0065996)), ('maintenance_window', np.float64(-0.01842632)), ('retry_count', np.float64(-0.9899865)), ('service_age', np.float64(-0.9307728)), ('on_call_load', np.float64(-0.03078758)), ('dup_alerts', np.float64(0.00490948)), ('sensor_drift', np.float64(-0.02641698)), ('aux_1', np.float64(0.06915641)), ('aux_2', np.float64(0.0466827)), ('aux_3', np.float64(-0.0177393)), ('aux_4', np.float64(0.00123197)), ('aux_5', np.float64(0.02995561))]
+14 b -0.4562320363128084 [('impact', np.float64(0.37522082)), ('urgency', np.float64(0.47036384)), ('users_affected', np.float64(0.71130947)), ('confidence', np.float64(-0.5395544)), ('error_rate', np.float64(0.60329444)), ('latency_spike', np.float64(-0.19110437)), ('tier_critical', np.float64(-0.10459212)), ('region_eu', np.float64(-0.01098344)), ('maintenance_window', np.float64(0.49181092)), ('retry_count', np.float64(0.11254553)), ('service_age', np.float64(-0.14505262)), ('on_call_load', np.float64(-0.06869899)), ('dup_alerts', np.float64(-0.02756036)), ('sensor_drift', np.float64(0.26114392)), ('aux_1', np.float64(0.18747547)), ('aux_2', np.float64(-0.14104497)), ('aux_3', np.float64(-0.09685118)), ('aux_4', np.float64(0.48477046)), ('aux_5', np.float64(0.04479092))]
+15 b 0.5513069197411959 [('impact', np.float64(-0.36247788)), ('urgency', np.float64(0.27938409)), ('users_affected', np.float64(-0.20854703)), ('confidence', np.float64(-0.08984749)), ('error_rate', np.float64(0.16635506)), ('latency_spike', np.float64(0.38015678)), ('tier_critical', np.float64(-0.40557086)), ('region_eu', np.float64(-0.33788179)), ('maintenance_window', np.float64(0.03176442)), ('retry_count', np.float64(0.33996707)), ('service_age', np.float64(0.02559122)), ('on_call_load', np.float64(0.23546123)), ('dup_alerts', np.float64(-0.23335938)), ('sensor_drift', np.float64(-0.09119491)), ('aux_1', np.float64(0.59176522)), ('aux_2', np.float64(-0.17181504)), ('aux_3', np.float64(0.16479558)), ('aux_4', np.float64(-0.00627793)), ('aux_5', np.float64(0.03536606))]
+16 b -0.46154439139338377 [('impact', np.float64(0.42424384)), ('urgency', np.float64(0.21258083)), ('users_affected', np.float64(0.36044482)), ('confidence', np.float64(0.53369228)), ('error_rate', np.float64(0.14416432)), ('latency_spike', np.float64(0.12059174)), ('tier_critical', np.float64(0.17857305)), ('region_eu', np.float64(-0.03030254)), ('maintenance_window', np.float64(-0.06711321)), ('retry_count', np.float64(-0.18023687)), ('service_age', np.float64(-0.24341347)), ('on_call_load', np.float64(0.46813626)), ('dup_alerts', np.float64(0.4736169)), ('sensor_drift', np.float64(0.20151053)), ('aux_1', np.float64(0.15788649)), ('aux_2', np.float64(-0.02790794)), ('aux_3', np.float64(-0.66624082)), ('aux_4', np.float64(-0.136287)), ('aux_5', np.float64(0.48550291))]
+17 b -0.4832673838544812 [('impact', np.float64(0.74616277)), ('urgency', np.float64(0.51250949)), ('users_affected', np.float64(0.48964206)), ('confidence', np.float64(0.18926402)), ('error_rate', np.float64(0.21519707)), ('latency_spike', np.float64(0.63507639)), ('tier_critical', np.float64(-0.05914389)), ('region_eu', np.float64(0.15601427)), ('maintenance_window', np.float64(-0.23534551)), ('retry_count', np.float64(-0.03195268)), ('service_age', np.float64(-0.2447404)), ('on_call_load', np.float64(0.60556198)), ('dup_alerts', np.float64(-0.40437679)), ('sensor_drift', np.float64(0.24238797)), ('aux_1', np.float64(0.22704513)), ('aux_2', np.float64(0.26385868)), ('aux_3', np.float64(-0.29193754)), ('aux_4', np.float64(-0.20976923)), ('aux_5', np.float64(0.42996418))]
+18 b 0.371283645402087 [('impact', np.float64(-0.08819198)), ('urgency', np.float64(-0.02684512)), ('users_affected', np.float64(-0.84937427)), ('confidence', np.float64(0.09952684)), ('error_rate', np.float64(0.77954159)), ('latency_spike', np.float64(-0.21053842)), ('tier_critical', np.float64(0.08829526)), ('region_eu', np.float64(-0.09874551)), ('maintenance_window', np.float64(-0.06714124)), ('retry_count', np.float64(0.26637093)), ('service_age', np.float64(0.49463628)), ('on_call_load', np.float64(-0.36652052)), ('dup_alerts', np.float64(-0.02869986)), ('sensor_drift', np.float64(-0.1362705)), ('aux_1', np.float64(0.10769678)), ('aux_2', np.float64(0.28250698)), ('aux_3', np.float64(-0.29250817)), ('aux_4', np.float64(-0.01288062)), ('aux_5', np.float64(-0.04317472))]
+19 b -0.10974531625479798 [('impact', np.float64(0.29001666)), ('urgency', np.float64(0.40802898)), ('users_affected', np.float64(-0.23715071)), ('confidence', np.float64(0.03089921)), ('error_rate', np.float64(-0.03869673)), ('latency_spike', np.float64(-0.31481733)), ('tier_critical', np.float64(-0.10504335)), ('region_eu', np.float64(-0.10279104)), ('maintenance_window', np.float64(-0.04427386)), ('retry_count', np.float64(-1.01685366)), ('service_age', np.float64(0.61650442)), ('on_call_load', np.float64(0.03696144)), ('dup_alerts', np.float64(0.19206148)), ('sensor_drift', np.float64(0.00515857)), ('aux_1', np.float64(-0.06838015)), ('aux_2', np.float64(0.0535043)), ('aux_3', np.float64(0.06910459)), ('aux_4', np.float64(-0.08780763)), ('aux_5', np.float64(-0.04818095))]
+20 b -0.40990000314005415 [('impact', np.float64(0.11699052)), ('urgency', np.float64(0.1612937)), ('users_affected', np.float64(0.27179961)), ('confidence', np.float64(0.48306828)), ('error_rate', np.float64(0.04509579)), ('latency_spike', np.float64(0.30671603)), ('tier_critical', np.float64(-0.11037695)), ('region_eu', np.float64(0.21880337)), ('maintenance_window', np.float64(0.11750909)), ('retry_count', np.float64(0.18915295)), ('service_age', np.float64(0.40657726)), ('on_call_load', np.float64(-0.29568541)), ('dup_alerts', np.float64(-0.30871098)), ('sensor_drift', np.float64(-0.00763431)), ('aux_1', np.float64(-0.089099)), ('aux_2', np.float64(0.41618361)), ('aux_3', np.float64(0.36646466)), ('aux_4', np.float64(-0.07265399)), ('aux_5', np.float64(-0.09286606))]
+21 b -0.46241008087230556 [('impact', np.float64(0.09054984)), ('urgency', np.float64(0.2290196)), ('users_affected', np.float64(0.36792379)), ('confidence', np.float64(0.08213584)), ('error_rate', np.float64(0.41622789)), ('latency_spike', np.float64(0.19850735)), ('tier_critical', np.float64(0.46055995)), ('region_eu', np.float64(-0.11495744)), ('maintenance_window', np.float64(0.21788949)), ('retry_count', np.float64(-0.18312479)), ('service_age', np.float64(0.04970358)), ('on_call_load', np.float64(-0.29374123)), ('dup_alerts', np.float64(1.17270911)), ('sensor_drift', np.float64(0.08619393)), ('aux_1', np.float64(0.35689214)), ('aux_2', np.float64(0.07628926)), ('aux_3', np.float64(-0.24589127)), ('aux_4', np.float64(0.20268659)), ('aux_5', np.float64(-0.10915173))]
+22 b 0.6719959366338993 [('impact', np.float64(0.22942603)), ('urgency', np.float64(-0.36838663)), ('users_affected', np.float64(-0.06211221)), ('confidence', np.float64(-0.38362709)), ('error_rate', np.float64(-0.10683559)), ('latency_spike', np.float64(0.63469264)), ('tier_critical', np.float64(-1.8553305)), ('region_eu', np.float64(-0.03098098)), ('maintenance_window', np.float64(-0.05394461)), ('retry_count', np.float64(-0.25578169)), ('service_age', np.float64(-0.0007423)), ('on_call_load', np.float64(0.35352341)), ('dup_alerts', np.float64(0.09346826)), ('sensor_drift', np.float64(-0.1161447)), ('aux_1', np.float64(0.21767027)), ('aux_2', np.float64(0.15683066)), ('aux_3', np.float64(-0.12450341)), ('aux_4', np.float64(-0.06483959)), ('aux_5', np.float64(0.10843501))]
+23 b -0.5126759618487109 [('impact', np.float64(0.31480779)), ('urgency', np.float64(0.83220433)), ('users_affected', np.float64(0.27048784)), ('confidence', np.float64(0.2775595)), ('error_rate', np.float64(0.07660715)), ('latency_spike', np.float64(-0.6104392)), ('tier_critical', np.float64(-0.23421083)), ('region_eu', np.float64(0.12806296)), ('maintenance_window', np.float64(-0.18693467)), ('retry_count', np.float64(-0.44052552)), ('service_age', np.float64(0.02105237)), ('on_call_load', np.float64(0.39922049)), ('dup_alerts', np.float64(0.47948397)), ('sensor_drift', np.float64(0.38915539)), ('aux_1', np.float64(0.50618072)), ('aux_2', np.float64(0.36516844)), ('aux_3', np.float64(0.6446515)), ('aux_4', np.float64(0.19479316)), ('aux_5', np.float64(-0.57715782))]
+24 b 0.618436550649414 [('impact', np.float64(-0.49920911)), ('urgency', np.float64(-0.00199513)), ('users_affected', np.float64(0.23924708)), ('confidence', np.float64(0.48465711)), ('error_rate', np.float64(-0.17504627)), ('latency_spike', np.float64(-0.24476471)), ('tier_critical', np.float64(0.11694399)), ('region_eu', np.float64(-0.00527375)), ('maintenance_window', np.float64(0.07676705)), ('retry_count', np.float64(-0.04987994)), ('service_age', np.float64(0.11570681)), ('on_call_load', np.float64(-0.36730299)), ('dup_alerts', np.float64(-0.45838183)), ('sensor_drift', np.float64(-0.00101183)), ('aux_1', np.float64(0.30613551)), ('aux_2', np.float64(0.26393491)), ('aux_3', np.float64(-0.15317461)), ('aux_4', np.float64(-0.06908402)), ('aux_5', np.float64(0.57084833))]
+25 b -0.0728709413215182 [('impact', np.float64(0.20440816)), ('urgency', np.float64(-0.10126598)), ('users_affected', np.float64(-0.11625129)), ('confidence', np.float64(-0.16147551)), ('error_rate', np.float64(-0.28207826)), ('latency_spike', np.float64(0.33601016)), ('tier_critical', np.float64(0.08211327)), ('region_eu', np.float64(0.00865564)), ('maintenance_window', np.float64(-0.06379497)), ('retry_count', np.float64(-1.18910103)), ('service_age', np.float64(1.2696286)), ('on_call_load', np.float64(0.10522422)), ('dup_alerts', np.float64(-0.07501136)), ('sensor_drift', np.float64(-0.06863659)), ('aux_1', np.float64(0.00553865)), ('aux_2', np.float64(0.14013059)), ('aux_3', np.float64(0.12391093)), ('aux_4', np.float64(-0.04146034)), ('aux_5', np.float64(0.03911165))]
+26 b 0.4450350348696154 [('impact', np.float64(-0.26633291)), ('urgency', np.float64(0.00461202)), ('users_affected', np.float64(-0.86345721)), ('confidence', np.float64(-0.00871247)), ('error_rate', np.float64(0.69792225)), ('latency_spike', np.float64(-0.48212083)), ('tier_critical', np.float64(0.37374569)), ('region_eu', np.float64(-0.21613972)), ('maintenance_window', np.float64(-0.11999169)), ('retry_count', np.float64(0.02739175)), ('service_age', np.float64(-0.19464955)), ('on_call_load', np.float64(0.04409982)), ('dup_alerts', np.float64(-0.02266013)), ('sensor_drift', np.float64(0.35732638)), ('aux_1', np.float64(0.20181705)), ('aux_2', np.float64(0.07109641)), ('aux_3', np.float64(-0.04205235)), ('aux_4', np.float64(-0.31715204)), ('aux_5', np.float64(0.06307352))]
+27 b 0.5207903304664457 [('impact', np.float64(-0.24598602)), ('urgency', np.float64(-0.39157563)), ('users_affected', np.float64(-0.3622629)), ('confidence', np.float64(-0.1284261)), ('error_rate', np.float64(0.25656842)), ('latency_spike', np.float64(0.06065971)), ('tier_critical', np.float64(-0.2394237)), ('region_eu', np.float64(-0.45936377)), ('maintenance_window', np.float64(0.51089386)), ('retry_count', np.float64(0.00230188)), ('service_age', np.float64(0.01079421)), ('on_call_load', np.float64(0.37761287)), ('dup_alerts', np.float64(0.36644225)), ('sensor_drift', np.float64(-0.24233594)), ('aux_1', np.float64(-0.30901344)), ('aux_2', np.float64(0.14409802)), ('aux_3', np.float64(-0.02854397)), ('aux_4', np.float64(-0.4249586)), ('aux_5', np.float64(0.19470192))]
+28 b 0.675262247152998 [('impact', np.float64(-0.54228106)), ('urgency', np.float64(-0.22960547)), ('users_affected', np.float64(0.11159967)), ('confidence', np.float64(-0.25929106)), ('error_rate', np.float64(-0.1336962)), ('latency_spike', np.float64(-0.62317556)), ('tier_critical', np.float64(0.07413902)), ('region_eu', np.float64(0.23513482)), ('maintenance_window', np.float64(-0.03228694)), ('retry_count', np.float64(0.31838132)), ('service_age', np.float64(0.04678301)), ('on_call_load', np.float64(0.1328018)), ('dup_alerts', np.float64(0.05785827)), ('sensor_drift', np.float64(0.26741192)), ('aux_1', np.float64(0.32020848)), ('aux_2', np.float64(0.45052405)), ('aux_3', np.float64(0.06455711)), ('aux_4', np.float64(0.09213849)), ('aux_5', np.float64(0.21007947))]
+29 b -0.5028856990783023 [('impact', np.float64(0.32922928)), ('urgency', np.float64(0.40400312)), ('users_affected', np.float64(0.4401308)), ('confidence', np.float64(0.20433152)), ('error_rate', np.float64(0.18349695)), ('latency_spike', np.float64(0.05624622)), ('tier_critical', np.float64(0.42303021)), ('region_eu', np.float64(0.71627619)), ('maintenance_window', np.float64(0.28047292)), ('retry_count', np.float64(0.24119451)), ('service_age', np.float64(0.68021329)), ('on_call_load', np.float64(-0.68919094)), ('dup_alerts', np.float64(-0.14012166)), ('sensor_drift', np.float64(-0.26766978)), ('aux_1', np.float64(0.26916679)), ('aux_2', np.float64(0.12301898)), ('aux_3', np.float64(0.2039624)), ('aux_4', np.float64(0.38533554)), ('aux_5', np.float64(0.14646384))]
+30 b 0.5852053208937554 [('impact', np.float64(-0.22308581)), ('urgency', np.float64(-0.41042599)), ('users_affected', np.float64(-0.43440273)), ('confidence', np.float64(-0.05071824)), ('error_rate', np.float64(-0.29363075)), ('latency_spike', np.float64(0.09307906)), ('tier_critical', np.float64(-0.22444409)), ('region_eu', np.float64(-0.2068542)), ('maintenance_window', np.float64(0.20286116)), ('retry_count', np.float64(0.41424662)), ('service_age', np.float64(0.16620151)), ('on_call_load', np.float64(0.06933109)), ('dup_alerts', np.float64(0.09043388)), ('sensor_drift', np.float64(0.50905557)), ('aux_1', np.float64(-0.04967863)), ('aux_2', np.float64(-0.16012072)), ('aux_3', np.float64(0.26638438)), ('aux_4', np.float64(0.26420419)), ('aux_5', np.float64(0.71167268))]
+31 b 0.07982889994395251 [('impact', np.float64(0.41736398)), ('urgency', np.float64(0.2829012)), ('users_affected', np.float64(-0.78981514)), ('confidence', np.float64(-0.08810477)), ('error_rate', np.float64(-0.6443923)), ('latency_spike', np.float64(0.07092872)), ('tier_critical', np.float64(0.07878565)), ('region_eu', np.float64(0.04689756)), ('maintenance_window', np.float64(-0.05822515)), ('retry_count', np.float64(0.82342343)), ('service_age', np.float64(-0.93733543)), ('on_call_load', np.float64(0.07473792)), ('dup_alerts', np.float64(0.14521974)), ('sensor_drift', np.float64(-0.00816617)), ('aux_1', np.float64(-0.01513863)), ('aux_2', np.float64(0.09500439)), ('aux_3', np.float64(0.25330195)), ('aux_4', np.float64(0.05108945)), ('aux_5', np.float64(-0.10641241))]
+32 b 0.5453935061509575 [('impact', np.float64(0.10515442)), ('urgency', np.float64(-0.41291453)), ('users_affected', np.float64(-0.56594092)), ('confidence', np.float64(0.27850809)), ('error_rate', np.float64(0.0416301)), ('latency_spike', np.float64(0.57268196)), ('tier_critical', np.float64(-1.272122)), ('region_eu', np.float64(-0.11751011)), ('maintenance_window', np.float64(-0.15706315)), ('retry_count', np.float64(0.27680901)), ('service_age', np.float64(-0.04886045)), ('on_call_load', np.float64(-0.19275272)), ('dup_alerts', np.float64(-0.06604269)), ('sensor_drift', np.float64(0.41759055)), ('aux_1', np.float64(-0.11815458)), ('aux_2', np.float64(-0.20366867)), ('aux_3', np.float64(-0.1406567)), ('aux_4', np.float64(0.44485394)), ('aux_5', np.float64(-0.01172354))]
+33 b -0.376959230762159 [('impact', np.float64(1.02115899)), ('urgency', np.float64(0.18171519)), ('users_affected', np.float64(-0.3599735)), ('confidence', np.float64(0.14761271)), ('error_rate', np.float64(-0.02312359)), ('latency_spike', np.float64(0.43559976)), ('tier_critical', np.float64(-0.15466458)), ('region_eu', np.float64(0.27653282)), ('maintenance_window', np.float64(-0.00499909)), ('retry_count', np.float64(0.25066815)), ('service_age', np.float64(-0.18775723)), ('on_call_load', np.float64(0.05292387)), ('dup_alerts', np.float64(0.23678852)), ('sensor_drift', np.float64(-0.10135746)), ('aux_1', np.float64(0.29105606)), ('aux_2', np.float64(-0.2560045)), ('aux_3', np.float64(-0.32341523)), ('aux_4', np.float64(0.16421689)), ('aux_5', np.float64(0.61200594))]
+34 b -0.5380955233120487 [('impact', np.float64(0.36753888)), ('urgency', np.float64(0.11426947)), ('users_affected', np.float64(0.16110936)), ('confidence', np.float64(0.2583738)), ('error_rate', np.float64(0.17772239)), ('latency_spike', np.float64(-0.17029868)), ('tier_critical', np.float64(0.83249125)), ('region_eu', np.float64(0.38521355)), ('maintenance_window', np.float64(-0.00942939)), ('retry_count', np.float64(-0.323999)), ('service_age', np.float64(0.55214607)), ('on_call_load', np.float64(0.11091669)), ('dup_alerts', np.float64(-0.09312943)), ('sensor_drift', np.float64(0.0501692)), ('aux_1', np.float64(-0.28963295)), ('aux_2', np.float64(0.16423702)), ('aux_3', np.float64(-0.07901422)), ('aux_4', np.float64(0.37364657)), ('aux_5', np.float64(0.10375689))]
+35 b 0.2907156957551455 [('impact', np.float64(-0.16188224)), ('urgency', np.float64(-0.25391679)), ('users_affected', np.float64(-0.10654621)), ('confidence', np.float64(-0.08423633)), ('error_rate', np.float64(-0.19650777)), ('latency_spike', np.float64(-1.33202537)), ('tier_critical', np.float64(1.33872716)), ('region_eu', np.float64(-0.03338277)), ('maintenance_window', np.float64(0.04560817)), ('retry_count', np.float64(0.09050815)), ('service_age', np.float64(0.05005913)), ('on_call_load', np.float64(0.11435588)), ('dup_alerts', np.float64(-0.20008453)), ('sensor_drift', np.float64(0.10335615)), ('aux_1', np.float64(-0.05569498)), ('aux_2', np.float64(-0.03695989)), ('aux_3', np.float64(0.07747524)), ('aux_4', np.float64(-0.00964662)), ('aux_5', np.float64(0.08991295))]
+36 b 0.7206215275661574 [('impact', np.float64(-0.27893469)), ('urgency', np.float64(-0.01300941)), ('users_affected', np.float64(0.33104567)), ('confidence', np.float64(-0.26855698)), ('error_rate', np.float64(-0.46927727)), ('latency_spike', np.float64(-0.05500246)), ('tier_critical', np.float64(0.1628251)), ('region_eu', np.float64(-0.00961646)), ('maintenance_window', np.float64(0.36403321)), ('retry_count', np.float64(0.09376184)), ('service_age', np.float64(0.43497184)), ('on_call_load', np.float64(0.15515482)), ('dup_alerts', np.float64(0.28000397)), ('sensor_drift', np.float64(0.35139598)), ('aux_1', np.float64(-0.08755048)), ('aux_2', np.float64(0.49290483)), ('aux_3', np.float64(-0.19803452)), ('aux_4', np.float64(0.1956552)), ('aux_5', np.float64(-0.34909143))]
+37 b 0.6324951763645815 [('impact', np.float64(-0.32008576)), ('urgency', np.float64(-0.25958007)), ('users_affected', np.float64(-0.79175818)), ('confidence', np.float64(0.0163563)), ('error_rate', np.float64(0.64498769)), ('latency_spike', np.float64(-0.23337874)), ('tier_critical', np.float64(0.2781053)), ('region_eu', np.float64(-0.12859018)), ('maintenance_window', np.float64(-0.25262347)), ('retry_count', np.float64(0.09135975)), ('service_age', np.float64(0.24614494)), ('on_call_load', np.float64(-0.08518671)), ('dup_alerts', np.float64(0.03840064)), ('sensor_drift', np.float64(-0.182828)), ('aux_1', np.float64(0.05704799)), ('aux_2', np.float64(0.06371513)), ('aux_3', np.float64(0.40172523)), ('aux_4', np.float64(-0.02084092)), ('aux_5', np.float64(-0.03226426))]
+38 b -0.4112163648520738 [('impact', np.float64(0.90045058)), ('urgency', np.float64(0.67434508)), ('users_affected', np.float64(0.74210059)), ('confidence', np.float64(-0.43687741)), ('error_rate', np.float64(-0.0038051)), ('latency_spike', np.float64(-0.04543883)), ('tier_critical', np.float64(0.67454713)), ('region_eu', np.float64(0.44697673)), ('maintenance_window', np.float64(0.49655287)), ('retry_count', np.float64(0.34131788)), ('service_age', np.float64(0.18734166)), ('on_call_load', np.float64(0.19409457)), ('dup_alerts', np.float64(0.2070111)), ('sensor_drift', np.float64(-0.07646513)), ('aux_1', np.float64(-0.07748563)), ('aux_2', np.float64(0.03305415)), ('aux_3', np.float64(0.30294529)), ('aux_4', np.float64(0.20311061)), ('aux_5', np.float64(-0.10092722))]
+39 b -0.5177158936941513 [('impact', np.float64(0.29452947)), ('urgency', np.float64(-0.06589526)), ('users_affected', np.float64(0.31704354)), ('confidence', np.float64(-0.02432951)), ('error_rate', np.float64(0.49844057)), ('latency_spike', np.float64(0.09730432)), ('tier_critical', np.float64(-0.17934978)), ('region_eu', np.float64(0.22220644)), ('maintenance_window', np.float64(0.61183836)), ('retry_count', np.float64(-0.09143762)), ('service_age', np.float64(-0.1833049)), ('on_call_load', np.float64(0.23169046)), ('dup_alerts', np.float64(0.50855854)), ('sensor_drift', np.float64(0.1169708)), ('aux_1', np.float64(-0.33340547)), ('aux_2', np.float64(-0.15098511)), ('aux_3', np.float64(0.38930775)), ('aux_4', np.float64(0.09450194)), ('aux_5', np.float64(0.42283869))]
+40 b -0.47514183231263135 [('impact', np.float64(0.30782705)), ('urgency', np.float64(1.09336931)), ('users_affected', np.float64(0.26166325)), ('confidence', np.float64(-0.30493522)), ('error_rate', np.float64(0.95480624)), ('latency_spike', np.float64(0.19821833)), ('tier_critical', np.float64(-0.24440201)), ('region_eu', np.float64(0.04761403)), ('maintenance_window', np.float64(-0.16374774)), ('retry_count', np.float64(0.42607151)), ('service_age', np.float64(0.33383451)), ('on_call_load', np.float64(0.39339764)), ('dup_alerts', np.float64(-0.56656626)), ('sensor_drift', np.float64(0.54115162)), ('aux_1', np.float64(0.59621651)), ('aux_2', np.float64(-0.11545763)), ('aux_3', np.float64(-0.2556547)), ('aux_4', np.float64(0.09164713)), ('aux_5', np.float64(0.35192948))]
+41 b -0.04785301221368192 [('impact', np.float64(-0.34894849)), ('urgency', np.float64(-0.61153182)), ('users_affected', np.float64(0.29066734)), ('confidence', np.float64(0.16147872)), ('error_rate', np.float64(-0.15709705)), ('latency_spike', np.float64(-0.1740578)), ('tier_critical', np.float64(-0.5003175)), ('region_eu', np.float64(0.15587504)), ('maintenance_window', np.float64(0.09847784)), ('retry_count', np.float64(-0.91265893)), ('service_age', np.float64(-0.32746818)), ('on_call_load', np.float64(0.51146757)), ('dup_alerts', np.float64(0.30925403)), ('sensor_drift', np.float64(-1.02048346)), ('aux_1', np.float64(-0.45149719)), ('aux_2', np.float64(-0.15110005)), ('aux_3', np.float64(-0.07137073)), ('aux_4', np.float64(-0.27020261)), ('aux_5', np.float64(-0.02201194))]
+42 b 0.534528015139141 [('impact', np.float64(-0.55317715)), ('urgency', np.float64(0.08714315)), ('users_affected', np.float64(-0.05170939)), ('confidence', np.float64(-0.14151898)), ('error_rate', np.float64(-0.09437023)), ('latency_spike', np.float64(-0.18927174)), ('tier_critical', np.float64(-0.36491722)), ('region_eu', np.float64(-0.41183977)), ('maintenance_window', np.float64(0.00357146)), ('retry_count', np.float64(0.02397036)), ('service_age', np.float64(-0.46704959)), ('on_call_load', np.float64(0.12883909)), ('dup_alerts', np.float64(0.08897294)), ('sensor_drift', np.float64(-0.2154661)), ('aux_1', np.float64(0.27067974)), ('aux_2', np.float64(0.38030347)), ('aux_3', np.float64(0.00033088)), ('aux_4', np.float64(0.05180008)), ('aux_5', np.float64(0.16831104))]
+43 b -0.013587893457386405 [('impact', np.float64(0.44568725)), ('urgency', np.float64(0.41628166)), ('users_affected', np.float64(-1.10676625)), ('confidence', np.float64(-0.04893503)), ('error_rate', np.float64(-0.21855395)), ('latency_spike', np.float64(-0.45085231)), ('tier_critical', np.float64(-0.67546991)), ('region_eu', np.float64(0.22692139)), ('maintenance_window', np.float64(-0.18804393)), ('retry_count', np.float64(-0.2281933)), ('service_age', np.float64(0.98914078)), ('on_call_load', np.float64(0.25057163)), ('dup_alerts', np.float64(0.37627098)), ('sensor_drift', np.float64(-0.02651449)), ('aux_1', np.float64(-0.23070686)), ('aux_2', np.float64(-0.33150605)), ('aux_3', np.float64(-0.1733514)), ('aux_4', np.float64(0.16281521)), ('aux_5', np.float64(-0.1746151))]
+44 b -0.4702990366719511 [('impact', np.float64(-0.51468479)), ('urgency', np.float64(0.74709884)), ('users_affected', np.float64(0.7168512)), ('confidence', np.float64(0.26906778)), ('error_rate', np.float64(0.39496166)), ('latency_spike', np.float64(0.38013813)), ('tier_critical', np.float64(0.23208444)), ('region_eu', np.float64(-0.29579991)), ('maintenance_window', np.float64(-0.2602099)), ('retry_count', np.float64(-0.07586409)), ('service_age', np.float64(-0.03398919)), ('on_call_load', np.float64(0.11790889)), ('dup_alerts', np.float64(0.57778781)), ('sensor_drift', np.float64(-0.13641344)), ('aux_1', np.float64(0.34163148)), ('aux_2', np.float64(-0.18752745)), ('aux_3', np.float64(0.38244813)), ('aux_4', np.float64(-0.10283095)), ('aux_5', np.float64(0.39873018))]
+45 b 0.6190802551181749 [('impact', np.float64(-0.5486988)), ('urgency', np.float64(-0.45532705)), ('users_affected', np.float64(-0.09641212)), ('confidence', np.float64(0.21250549)), ('error_rate', np.float64(0.10685929)), ('latency_spike', np.float64(0.4795912)), ('tier_critical', np.float64(-0.83600164)), ('region_eu', np.float64(0.15308448)), ('maintenance_window', np.float64(-0.10774396)), ('retry_count', np.float64(-0.17713052)), ('service_age', np.float64(0.07902526)), ('on_call_load', np.float64(0.19690813)), ('dup_alerts', np.float64(0.33656702)), ('sensor_drift', np.float64(-0.19055726)), ('aux_1', np.float64(-0.03336627)), ('aux_2', np.float64(-0.00289909)), ('aux_3', np.float64(0.46992802)), ('aux_4', np.float64(0.06207652)), ('aux_5', np.float64(0.20629914))]
+46 b 0.6983168520799786 [('impact', np.float64(-0.27381767)), ('urgency', np.float64(0.53291812)), ('users_affected', np.float64(0.15684587)), ('confidence', np.float64(-0.03290995)), ('error_rate', np.float64(-0.49172579)), ('latency_spike', np.float64(0.64039545)), ('tier_critical', np.float64(-1.76818794)), ('region_eu', np.float64(0.02287373)), ('maintenance_window', np.float64(-0.05748713)), ('retry_count', np.float64(0.15756822)), ('service_age', np.float64(0.00232591)), ('on_call_load', np.float64(0.02751732)), ('dup_alerts', np.float64(0.04909184)), ('sensor_drift', np.float64(0.07358425)), ('aux_1', np.float64(-0.24202208)), ('aux_2', np.float64(0.02828728)), ('aux_3', np.float64(-0.07387305)), ('aux_4', np.float64(-0.23892766)), ('aux_5', np.float64(-0.16702024))]
+47 b 0.10658186480455635 [('impact', np.float64(0.76371301)), ('urgency', np.float64(0.69514096)), ('users_affected', np.float64(-0.56792097)), ('confidence', np.float64(0.07487163)), ('error_rate', np.float64(-0.76603517)), ('latency_spike', np.float64(-0.71690007)), ('tier_critical', np.float64(-0.59585162)), ('region_eu', np.float64(0.16792855)), ('maintenance_window', np.float64(0.01722995)), ('retry_count', np.float64(-0.3606533)), ('service_age', np.float64(-0.13614952)), ('on_call_load', np.float64(-0.07413998)), ('dup_alerts', np.float64(0.24744873)), ('sensor_drift', np.float64(0.03435816)), ('aux_1', np.float64(0.37877709)), ('aux_2', np.float64(0.18092801)), ('aux_3', np.float64(-0.16742893)), ('aux_4', np.float64(-0.05169942)), ('aux_5', np.float64(0.20447153))]
+48 b 0.39761963495691155 [('impact', np.float64(-0.05870937)), ('urgency', np.float64(-0.27123624)), ('users_affected', np.float64(-1.0834652)), ('confidence', np.float64(0.26716123)), ('error_rate', np.float64(0.88823965)), ('latency_spike', np.float64(0.2181574)), ('tier_critical', np.float64(-0.19732529)), ('region_eu', np.float64(0.75845195)), ('maintenance_window', np.float64(-0.01359703)), ('retry_count', np.float64(-0.34668835)), ('service_age', np.float64(-0.27752156)), ('on_call_load', np.float64(0.2370048)), ('dup_alerts', np.float64(-0.65533802)), ('sensor_drift', np.float64(-0.05413005)), ('aux_1', np.float64(-0.33440562)), ('aux_2', np.float64(0.24587306)), ('aux_3', np.float64(0.10836772)), ('aux_4', np.float64(-0.35398072)), ('aux_5', np.float64(-0.06469297))]
+49 b 0.5175518103642349 [('impact', np.float64(-0.2911177)), ('urgency', np.float64(0.30225116)), ('users_affected', np.float64(-0.41726807)), ('confidence', np.float64(0.20465174)), ('error_rate', np.float64(0.12541722)), ('latency_spike', np.float64(-0.49159016)), ('tier_critical', np.float64(0.38541319)), ('region_eu', np.float64(-0.28048948)), ('maintenance_window', np.float64(0.4422122)), ('retry_count', np.float64(0.15271812)), ('service_age', np.float64(0.14865414)), ('on_call_load', np.float64(0.1611689)), ('dup_alerts', np.float64(-0.22855704)), ('sensor_drift', np.float64(-0.13699586)), ('aux_1', np.float64(-0.17508567)), ('aux_2', np.float64(-0.07574212)), ('aux_3', np.float64(0.01933563)), ('aux_4', np.float64(0.16439989)), ('aux_5', np.float64(0.32616054))]
+50 b 0.5268444998560582 [('impact', np.float64(-0.13367354)), ('urgency', np.float64(0.49571965)), ('users_affected', np.float64(-0.19381116)), ('confidence', np.float64(0.08983209)), ('error_rate', np.float64(-0.74417817)), ('latency_spike', np.float64(-0.40297798)), ('tier_critical', np.float64(-0.55602541)), ('region_eu', np.float64(-0.1624057)), ('maintenance_window', np.float64(-0.20985228)), ('retry_count', np.float64(0.12701625)), ('service_age', np.float64(0.37999062)), ('on_call_load', np.float64(-0.01060861)), ('dup_alerts', np.float64(-0.14922062)), ('sensor_drift', np.float64(0.05225896)), ('aux_1', np.float64(0.11353948)), ('aux_2', np.float64(-0.19673505)), ('aux_3', np.float64(-0.03097199)), ('aux_4', np.float64(0.32726493)), ('aux_5', np.float64(0.41691473))]
+51 b -0.03197024073481613 [('impact', np.float64(0.54794926)), ('urgency', np.float64(0.46738852)), ('users_affected', np.float64(0.11548265)), ('confidence', np.float64(0.03435076)), ('error_rate', np.float64(0.1542288)), ('latency_spike', np.float64(-0.23114167)), ('tier_critical', np.float64(-0.44268428)), ('region_eu', np.float64(0.10983381)), ('maintenance_window', np.float64(0.152346)), ('retry_count', np.float64(0.00170422)), ('service_age', np.float64(0.32784042)), ('on_call_load', np.float64(0.05548714)), ('dup_alerts', np.float64(-0.36354706)), ('sensor_drift', np.float64(-0.28527618)), ('aux_1', np.float64(-0.6730533)), ('aux_2', np.float64(0.04511462)), ('aux_3', np.float64(-0.2666797)), ('aux_4', np.float64(0.17040151)), ('aux_5', np.float64(-0.53567334))]
+52 b 0.6454977891360371 [('impact', np.float64(-0.22067481)), ('urgency', np.float64(-0.10322352)), ('users_affected', np.float64(-0.23046432)), ('confidence', np.float64(-0.01218624)), ('error_rate', np.float64(-0.59135043)), ('latency_spike', np.float64(0.05411424)), ('tier_critical', np.float64(-0.05701792)), ('region_eu', np.float64(0.31702226)), ('maintenance_window', np.float64(0.73474958)), ('retry_count', np.float64(0.21671298)), ('service_age', np.float64(0.40320216)), ('on_call_load', np.float64(0.29392422)), ('dup_alerts', np.float64(0.06963196)), ('sensor_drift', np.float64(-0.44657775)), ('aux_1', np.float64(0.09593245)), ('aux_2', np.float64(0.18406852)), ('aux_3', np.float64(0.08213733)), ('aux_4', np.float64(0.0291888)), ('aux_5', np.float64(0.23485676))]
+53 b -0.41844609643195196 [('impact', np.float64(0.42480642)), ('urgency', np.float64(0.50147691)), ('users_affected', np.float64(0.78333973)), ('confidence', np.float64(0.67538456)), ('error_rate', np.float64(-0.004934)), ('latency_spike', np.float64(0.12299458)), ('tier_critical', np.float64(-0.35939083)), ('region_eu', np.float64(-0.2001273)), ('maintenance_window', np.float64(0.66157652)), ('retry_count', np.float64(-0.2292881)), ('service_age', np.float64(0.15447221)), ('on_call_load', np.float64(0.33199109)), ('dup_alerts', np.float64(0.46069904)), ('sensor_drift', np.float64(-0.19064811)), ('aux_1', np.float64(-0.26991023)), ('aux_2', np.float64(0.22594761)), ('aux_3', np.float64(0.23160931)), ('aux_4', np.float64(-0.21234367)), ('aux_5', np.float64(0.54698727))]
+54 b 0.683555321008547 [('impact', np.float64(-0.76173896)), ('urgency', np.float64(0.6354634)), ('users_affected', np.float64(-0.62009478)), ('confidence', np.float64(-0.13125513)), ('error_rate', np.float64(0.06393804)), ('latency_spike', np.float64(-0.16257312)), ('tier_critical', np.float64(0.06509443)), ('region_eu', np.float64(-0.0286181)), ('maintenance_window', np.float64(-0.03574941)), ('retry_count', np.float64(0.35266141)), ('service_age', np.float64(0.56824869)), ('on_call_load', np.float64(0.0893317)), ('dup_alerts', np.float64(0.24810056)), ('sensor_drift', np.float64(-0.08997976)), ('aux_1', np.float64(0.17760638)), ('aux_2', np.float64(-0.05285568)), ('aux_3', np.float64(0.05567664)), ('aux_4', np.float64(0.08810803)), ('aux_5', np.float64(0.56178463))]
+55 b 0.5494042705532474 [('impact', np.float64(-0.22533693)), ('urgency', np.float64(-0.19944362)), ('users_affected', np.float64(0.44986098)), ('confidence', np.float64(-0.09978544)), ('error_rate', np.float64(-0.68036863)), ('latency_spike', np.float64(-0.29990654)), ('tier_critical', np.float64(0.27375008)), ('region_eu', np.float64(0.22991802)), ('maintenance_window', np.float64(0.38054743)), ('retry_count', np.float64(-0.26741668)), ('service_age', np.float64(-0.29695384)), ('on_call_load', np.float64(-0.04094979)), ('dup_alerts', np.float64(0.21999315)), ('sensor_drift', np.float64(0.11778698)), ('aux_1', np.float64(-0.17310927)), ('aux_2', np.float64(-0.03885041)), ('aux_3', np.float64(0.49261137)), ('aux_4', np.float64(-0.03995347)), ('aux_5', np.float64(-0.22413341))]
+56 b 0.5239498040767909 [('impact', np.float64(0.0121676)), ('urgency', np.float64(0.12256534)), ('users_affected', np.float64(0.29435056)), ('confidence', np.float64(-0.09449204)), ('error_rate', np.float64(-0.5382445)), ('latency_spike', np.float64(-0.0899284)), ('tier_critical', np.float64(-0.46188604)), ('region_eu', np.float64(0.37480665)), ('maintenance_window', np.float64(-0.34395408)), ('retry_count', np.float64(-0.16835172)), ('service_age', np.float64(-0.00991146)), ('on_call_load', np.float64(-0.30342688)), ('dup_alerts', np.float64(-0.02262696)), ('sensor_drift', np.float64(0.16564529)), ('aux_1', np.float64(-0.43181881)), ('aux_2', np.float64(0.03888306)), ('aux_3', np.float64(-0.30576196)), ('aux_4', np.float64(0.15250433)), ('aux_5', np.float64(0.42861602))]
+57 b 0.625143570630506 [('impact', np.float64(-0.32581967)), ('urgency', np.float64(-0.12225382)), ('users_affected', np.float64(-0.31689696)), ('confidence', np.float64(-0.19453047)), ('error_rate', np.float64(-0.12607446)), ('latency_spike', np.float64(0.03105312)), ('tier_critical', np.float64(-0.03698881)), ('region_eu', np.float64(0.10808159)), ('maintenance_window', np.float64(0.61914927)), ('retry_count', np.float64(0.21192709)), ('service_age', np.float64(0.13922487)), ('on_call_load', np.float64(0.29057813)), ('dup_alerts', np.float64(-0.29871371)), ('sensor_drift', np.float64(-0.03216434)), ('aux_1', np.float64(-0.09004886)), ('aux_2', np.float64(0.06182667)), ('aux_3', np.float64(0.23822485)), ('aux_4', np.float64(0.40742565)), ('aux_5', np.float64(0.75338555))]
+58 b 0.4296974033686678 [('impact', np.float64(-0.19118766)), ('urgency', np.float64(-0.81054395)), ('users_affected', np.float64(-0.91825776)), ('confidence', np.float64(0.22435776)), ('error_rate', np.float64(0.39317792)), ('latency_spike', np.float64(-0.00721575)), ('tier_critical', np.float64(0.34264394)), ('region_eu', np.float64(0.40428405)), ('maintenance_window', np.float64(0.1024237)), ('retry_count', np.float64(0.38019751)), ('service_age', np.float64(0.60549595)), ('on_call_load', np.float64(0.56764479)), ('dup_alerts', np.float64(0.09603984)), ('sensor_drift', np.float64(-0.20350381)), ('aux_1', np.float64(-0.15629802)), ('aux_2', np.float64(0.26442499)), ('aux_3', np.float64(-0.71383421)), ('aux_4', np.float64(-0.08380678)), ('aux_5', np.float64(-0.05917586))]
+59 b 0.6399794385632118 [('impact', np.float64(-0.45306603)), ('urgency', np.float64(-0.17214355)), ('users_affected', np.float64(-0.33976094)), ('confidence', np.float64(0.29772467)), ('error_rate', np.float64(-0.11936513)), ('latency_spike', np.float64(0.35778359)), ('tier_critical', np.float64(-0.28058671)), ('region_eu', np.float64(-0.11231222)), ('maintenance_window', np.float64(0.29011703)), ('retry_count', np.float64(0.23486156)), ('service_age', np.float64(0.35894181)), ('on_call_load', np.float64(0.02353208)), ('dup_alerts', np.float64(-0.29820993)), ('sensor_drift', np.float64(0.1838344)), ('aux_1', np.float64(0.32110195)), ('aux_2', np.float64(0.06813506)), ('aux_3', np.float64(0.24862184)), ('aux_4', np.float64(-0.02827254)), ('aux_5', np.float64(-0.24979575))]
+60 b 0.4676483077023216 [('impact', np.float64(-0.49163665)), ('urgency', np.float64(-0.46767425)), ('users_affected', np.float64(0.05241037)), ('confidence', np.float64(-0.3450243)), ('error_rate', np.float64(0.12684042)), ('latency_spike', np.float64(0.20987733)), ('tier_critical', np.float64(-0.21516984)), ('region_eu', np.float64(0.02351906)), ('maintenance_window', np.float64(0.0577385)), ('retry_count', np.float64(0.2420476)), ('service_age', np.float64(0.70146867)), ('on_call_load', np.float64(-0.05549822)), ('dup_alerts', np.float64(0.13158278)), ('sensor_drift', np.float64(0.48972762)), ('aux_1', np.float64(-0.22939838)), ('aux_2', np.float64(0.06983449)), ('aux_3', np.float64(0.16375009)), ('aux_4', np.float64(0.09631863)), ('aux_5', np.float64(-0.01643173))]
+61 b 0.4704555100403988 [('impact', np.float64(-0.33027451)), ('urgency', np.float64(-0.23915269)), ('users_affected', np.float64(0.49747664)), ('confidence', np.float64(-0.04780259)), ('error_rate', np.float64(-0.86334049)), ('latency_spike', np.float64(-0.15453872)), ('tier_critical', np.float64(-0.00012511)), ('region_eu', np.float64(0.32582823)), ('maintenance_window', np.float64(-0.02571085)), ('retry_count', np.float64(0.29379329)), ('service_age', np.float64(0.16741782)), ('on_call_load', np.float64(-0.05773063)), ('dup_alerts', np.float64(-0.06697551)), ('sensor_drift', np.float64(-0.00136823)), ('aux_1', np.float64(0.13254493)), ('aux_2', np.float64(0.01018439)), ('aux_3', np.float64(-0.07073042)), ('aux_4', np.float64(-0.03957727)), ('aux_5', np.float64(0.0197125))]
+62 b 0.5528702528100242 [('impact', np.float64(-0.04834224)), ('urgency', np.float64(-0.07147708)), ('users_affected', np.float64(-0.31383235)), ('confidence', np.float64(0.14711397)), ('error_rate', np.float64(-0.06598216)), ('latency_spike', np.float64(0.38436704)), ('tier_critical', np.float64(-1.51641998)), ('region_eu', np.float64(0.05345993)), ('maintenance_window', np.float64(0.18865895)), ('retry_count', np.float64(0.19228717)), ('service_age', np.float64(0.07774955)), ('on_call_load', np.float64(-0.05722744)), ('dup_alerts', np.float64(-0.63558297)), ('sensor_drift', np.float64(0.09835806)), ('aux_1', np.float64(-0.05315168)), ('aux_2', np.float64(0.06167217)), ('aux_3', np.float64(0.22616084)), ('aux_4', np.float64(-0.05464079)), ('aux_5', np.float64(0.10682286))]
+63 b 0.59516416357344 [('impact', np.float64(-0.21050832)), ('urgency', np.float64(-0.1319903)), ('users_affected', np.float64(-0.92169562)), ('confidence', np.float64(0.04859175)), ('error_rate', np.float64(0.69015852)), ('latency_spike', np.float64(0.1058441)), ('tier_critical', np.float64(-0.47418302)), ('region_eu', np.float64(0.1161349)), ('maintenance_window', np.float64(0.11087839)), ('retry_count', np.float64(0.2026013)), ('service_age', np.float64(0.14217838)), ('on_call_load', np.float64(-0.07771539)), ('dup_alerts', np.float64(0.02726038)), ('sensor_drift', np.float64(-0.00228364)), ('aux_1', np.float64(0.10972696)), ('aux_2', np.float64(-0.19618338)), ('aux_3', np.float64(-0.01366671)), ('aux_4', np.float64(-0.0972727)), ('aux_5', np.float64(-0.05534042))]
+64 b -0.7 [('error_rate', np.float64(1.0))]
+65 b 0.7 [('error_rate', np.float64(-1.0))]
+66 b 1.0 [('tier_critical', np.float64(-1.0))]
+
+LAYER 1 bias [-0.1858223  -0.36245275 -0.35024018  0.46859505 -0.3894317   0.46141364  0.48359564 -0.38918463 -0.38792323  0.57571744  0.37029749  0.49810439  0.49301418  0.51074036  0.45573759  0.37974466
+ -0.02370381  0.42904324 -0.3489075  -0.34145643 -0.133217    0.47895634 -0.42602708  0.47454883  0.48271997 -0.40463509 -0.38531668  0.49455011  0.45701112 -0.36123906  0.63144963  0.40451839
+ -0.35848957 -0.01163308  0.50741002 -0.41372938  0.46262695  0.47019095  0.42074849 -0.13359942 -0.36826513  0.45188746 -0.28974125 -0.39326159  0.52062375 -0.40333476  0.44276334 -0.4170141
+  0.4566699   0.50185703  0.50779494  0.48809883 -0.38022465  0.50049245  0.60778892 -0.36015426  0.52690242 -0.02375552  0.52397334  0.54220836 -0.37852401 -0.01724784  0.4478156   0.11746666
+  0.          0.        ]
+0 b -0.18582229621064392 nz 64 dense
+1 b -0.36245274931690014 nz 64 dense
+2 b -0.350240183443603 nz 64 dense
+3 b 0.46859505151755615 nz 64 dense
+4 b -0.3894317029226896 nz 64 dense
+5 b 0.461413643533929 nz 64 dense
+6 b 0.48359563916126874 nz 64 dense
+7 b -0.3891846323156277 nz 64 dense
+8 b -0.38792322778735994 nz 64 dense
+9 b 0.5757174378882216 nz 64 dense
+10 b 0.37029748707168414 nz 64 dense
+11 b 0.49810438631516735 nz 64 dense
+12 b 0.4930141799786539 nz 64 dense
+13 b 0.5107403639387464 nz 64 dense
+14 b 0.4557375918910736 nz 64 dense
+15 b 0.3797446621556694 nz 64 dense
+16 b -0.023703806064642667 nz 64 dense
+17 b 0.42904324167885066 nz 64 dense
+18 b -0.3489074981215614 nz 64 dense
+19 b -0.3414564268561015 nz 64 dense
+20 b -0.13321699688367053 nz 64 dense
+21 b 0.47895634119875724 nz 64 dense
+22 b -0.42602708202544753 nz 64 dense
+23 b 0.4745488294105716 nz 64 dense
+24 b 0.4827199665349711 nz 64 dense
+25 b -0.40463508801848774 nz 64 dense
+26 b -0.38531667703349687 nz 64 dense
+27 b 0.4945501131943071 nz 64 dense
+28 b 0.4570111236530733 nz 64 dense
+29 b -0.3612390562182685 nz 64 dense
+30 b 0.6314496261243807 nz 64 dense
+31 b 0.4045183890027407 nz 64 dense
+32 b -0.35848956957052114 nz 64 dense
+33 b -0.011633082402185975 nz 64 dense
+34 b 0.5074100154076354 nz 64 dense
+35 b -0.41372938344871146 nz 64 dense
+36 b 0.46262695072139715 nz 64 dense
+37 b 0.4701909531876802 nz 64 dense
+38 b 0.4207484927506231 nz 64 dense
+39 b -0.13359942100679315 nz 64 dense
+40 b -0.3682651328700776 nz 64 dense
+41 b 0.4518874625985101 nz 64 dense
+42 b -0.2897412485097117 nz 64 dense
+43 b -0.3932615870676393 nz 64 dense
+44 b 0.5206237450820751 nz 64 dense
+45 b -0.4033347607704617 nz 64 dense
+46 b 0.44276333935356815 nz 64 dense
+47 b -0.41701409820328056 nz 64 dense
+48 b 0.4566698975907846 nz 64 dense
+49 b 0.5018570313247404 nz 64 dense
+50 b 0.5077949361574392 nz 64 dense
+51 b 0.48809882695328854 nz 64 dense
+52 b -0.38022464701895603 nz 64 dense
+53 b 0.5004924523201889 nz 64 dense
+54 b 0.607788920040501 nz 64 dense
+55 b -0.36015426401161604 nz 64 dense
+56 b 0.5269024249791734 nz 64 dense
+57 b -0.023755517587873688 nz 64 dense
+58 b 0.5239733383666997 nz 64 dense
+59 b 0.5422083621493824 nz 64 dense
+60 b -0.37852401204903396 nz 64 dense
+61 b -0.017247835477647567 nz 64 dense
+62 b 0.4478155982026341 nz 64 dense
+63 b 0.11746665759743014 nz 64 dense
+64 b 0.0 nz 2 [(np.int64(64), np.float64(1.0)), (np.int64(66), np.float64(-1.0))]
+65 b 0.0 nz 2 [(np.int64(65), np.float64(1.0)), (np.int64(66), np.float64(1.0))]
+
+LAYER 2 bias [-0.3600768  0.3600768  0.         0.       ]
+[[ 0.8516386  -0.8516386   0.          0.        ]
+ [ 0.99720146 -0.99720146  0.          0.        ]
+ [ 0.5739968  -0.5739968   0.          0.        ]
+ [-0.79117144  0.79117144  0.          0.        ]
+ [ 0.50194389 -0.50194389  0.          0.        ]
+ [-0.49933932  0.49933932  0.          0.        ]
+ [-0.5386096   0.5386096   0.          0.        ]
+ [ 0.97073285 -0.97073285  0.          0.        ]
+ [ 0.79732325 -0.79732325  0.          0.        ]
+ [-0.69061033  0.69061033  0.          0.        ]
+ [-1.50493998  1.50493998  0.          0.        ]
+ [-0.42083929  0.42083929  0.          0.        ]
+ [-0.63460551  0.63460551  0.          0.        ]
+ [-0.50577926  0.50577926  0.          0.        ]
+ [-0.41469206  0.41469206  0.          0.        ]
+ [-0.10340201  0.10340201  0.          0.        ]
+ [ 0.02002281 -0.02002281  0.          0.        ]
+ [-0.78800814  0.78800814  0.          0.        ]
+ [ 0.61051407 -0.61051407  0.          0.        ]
+ [ 0.91933482 -0.91933482  0.          0.        ]
+ [ 2.13669669 -2.13669669  0.          0.        ]
+ [-0.63955717  0.63955717  0.          0.        ]
+ [ 0.43595825 -0.43595825  0.          0.        ]
+ [-0.63205583  0.63205583  0.          0.        ]
+ [-0.56536972  0.56536972  0.          0.        ]
+ [ 0.70871242 -0.70871242  0.          0.        ]
+ [ 0.67083322 -0.67083322  0.          0.        ]
+ [-0.58622688  0.58622688  0.          0.        ]
+ [-0.521819    0.521819    0.          0.        ]
+ [ 0.58430165 -0.58430165  0.          0.        ]
+ [-1.1562046   1.1562046   0.          0.        ]
+ [-0.9855259   0.9855259   0.          0.        ]
+ [ 1.44825798 -1.44825798  0.          0.        ]
+ [ 0.19776143 -0.19776143  0.          0.        ]
+ [-0.74145089  0.74145089  0.          0.        ]
+ [ 0.43405439 -0.43405439  0.          0.        ]
+ [-0.73843809  0.73843809  0.          0.        ]
+ [-0.89626658  0.89626658  0.          0.        ]
+ [-1.09152826  1.09152826  0.          0.        ]
+ [ 1.00671715 -1.00671715  0.          0.        ]
+ [ 0.84798603 -0.84798603  0.          0.        ]
+ [-0.6234071   0.6234071   0.          0.        ]
+ [ 0.93852773 -0.93852773  0.          0.        ]
+ [ 0.71857472 -0.71857472  0.          0.        ]
+ [-0.87438661  0.87438661  0.          0.        ]
+ [ 0.56530529 -0.56530529  0.          0.        ]
+ [-0.51681747  0.51681747  0.          0.        ]
+ [ 0.42087141 -0.42087141  0.          0.        ]
+ [-0.85270383  0.85270383  0.          0.        ]
+ [-0.99702538  0.99702538  0.          0.        ]
+ [-1.04594573  1.04594573  0.          0.        ]
+ [-0.51399752  0.51399752  0.          0.        ]
+ [ 0.69851812 -0.69851812  0.          0.        ]
+ [-0.55327451  0.55327451  0.          0.        ]
+ [-1.2733982   1.2733982   0.          0.        ]
+ [ 0.75192616 -0.75192616  0.          0.        ]
+ [-0.70308245  0.70308245  0.          0.        ]
+ [ 0.0263765  -0.0263765   0.          0.        ]
+ [-0.42687964  0.42687964  0.          0.        ]
+ [-0.45023233  0.45023233  0.          0.        ]
+ [ 0.41795566 -0.41795566  0.          0.        ]
+ [ 0.04355208 -0.04355208  0.          0.        ]
+ [-0.62982458  0.62982458  0.          0.        ]
+ [-1.31764079  1.31764079  0.          0.        ]
+ [ 0.          0.          1.          0.        ]
+ [ 0.          0.          0.          1.        ]]
+
+LAYER 3 bias [0. 0. 0.]
+[[ 1.  0.  0.]
+ [ 0.  1.  1.]
+ [ 1.  0.  0.]
+ [ 0.  0. -1.]]
+
+LAYER 4 bias [0. 0.]
+[[ 1.  0.]
+ [ 0.  1.]
+ [ 0. -1.]]
+
+LAYER 5 bias [0.]
+[[ 1.]
+ [-1.]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+I can add the urgency correction before the existing network and keep its weights unchanged. The switch will cover every float64 confidence value used by model.py. ReLU networks are continuous, so an exact switch over all real numbers is not possible; I will state this limit in NOTES.md.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from model import load,logit
+m=load('model_in.json')
+e=np.genfromtxt('evidence.csv',delimiter=',',skip_header=1)
+x=e[:,:20].copy();x[x[:,4]<.4,1]*=2
+p=logit(m,x)>0
+print('Evidence reference agreement:',int(np.sum(p==e[:,20])), '/', len(e))
+print('Evidence confidence values:', sorted(set(e[:,4])))
+print('Tone input weights all zero:',bool(np.all(m[0][0][3]==0)))
+print('Confidence predecessor gap:', .4-np.nextafter(.4,-np.inf))
+print('Gate bound:',2.**54*(.4-np.nextafter(.4,-np.inf)))
+PY" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+Evidence reference agreement: 31 / 32
+Evidence confidence values: [np.float64(0.051), np.float64(0.065), np.float64(0.082), np.float64(0.095), np.float64(0.123), np.float64(0.189), np.float64(0.191), np.float64(0.207), np.float64(0.221), np.float64(0.224), np.float64(0.239), np.float64(0.247), np.float64(0.248), np.float64(0.258), np.float64(0.259), np.float64(0.267), np.float64(0.32), np.float64(0.332), np.float64(0.333), np.float64(0.335), np.float64(0.347), np.float64(0.367), np.float64(0.368), np.float64(0.39), np.float64(0.395), np.float64(0.434), np.float64(0.452), np.float64(0.476), np.float64(0.502), np.float64(0.503), np.float64(0.531)]
+Tone input weights all zero: True
+Confidence predecessor gap: 5.551115123125783e-17
+Gate bound: 1.0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from model import load,logit
+m=load('model_in.json');e=np.genfromtxt('evidence.csv',delimiter=',',skip_header=1)
+x=e[:,:20].copy();x[x[:,4]<.4,1]*=2
+v=logit(m,x);old=logit(m,e[:,:20]);ii=np.flatnonzero((v>0)"'!=e[:,20])
+for i in ii:print('"'row',i+1,'label',e[i,20],'before',old[i],'after',v[i],'features',e[i,:20])
+print('Reference logits:',v)
+PY" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+row 13 label 1.0 before -1.2359999999999998 after -0.30853756626312 features [0.887 0.047 0.962 0.78  0.239 0.464 0.303 0.    1.    0.    0.054 0.123
+ 0.54  0.106 0.338 0.025 0.305 0.529 0.064 0.31 ]
+Reference logits: [ 49.60087438  54.00952901  50.05962099  19.9373864   25.7854983
+   3.4364861    3.56169749  29.13771043   3.34670075  11.40409651
+  47.28063767  28.30278535  -0.30853757  19.13357581  21.00632592
+  56.03523684  -1.16        -0.117       81.79033584  -1.511
+  -1.546       -1.395       -1.          -1.487       -1.
+  -1.          -1.          -0.623       11.73715351 103.37822862
+  41.00440181  -0.135     ]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+import numpy as np
+
+# Analytical construction only. No parameters depend on evidence or test results.
+with open('model_in.json') as f:
+    document = json.load(f)
+
+# Layer 1: retain the 20 nonnegative inputs and compute d = ReLU(0.4-c).
+w1 = np.zeros((20, 21)); w1[:, :20] = np.eye(20)
+w1[4, 20] = -1
+b1 = np.zeros(21); b1[20] = 0.4
+
+# Layer 2: retain the inputs and compute r = ReLU(u - 2**54*d).
+# The nearest float64 confidence below 0.4 is 2**-54 away.
+# Thus r=0 for every representable c<0.4 and r=u for c>=0.4.
+w2 = np.zeros((21, 21)); w2[:20, :20] = np.eye(20)
+w2[1, 20] = 1; w2[20, 20] = -(2.0**54)
+b2 = np.zeros(21)
+
+# Layer 3: restore the original feature order, with urgency replaced by 2u-r.
+w3 = np.zeros((21, 20)); w3[:20, :] = np.eye(20)
+w3[1, 1] = 2; w3[20, 1] = -1
+b3 = np.zeros(20)
+
+prefix = [{'W': w.tolist(), 'b': b.tolist()} for w,b in [(w1,b1),(w2,b2),(w3,b3)]]
+document['layers'] = prefix + document['layers']
+with open('model_out.json', 'w') as f:
+    json.dump(document, f)
+    f.write('\\n')
+print('Wrote model_out.json with', len(document['layers']), 'layers.')
+PY" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 0ms:
+Wrote model_out.json with 9 layers.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/large/s1/sol-r0/step4/NOTES.md
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..52cb7c6c7bff8fb0b19bf1d4a8efd06c1f0bb46f
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,18 @@
++I added three ReLU layers before the unchanged network. They compute
++`d = ReLU(0.4 - confidence)`, `r = ReLU(urgency - 2**54 * d)`, and
++`adjusted_urgency = 2 * urgency - r`. They pass all other features unchanged.
++
++For float64 inputs, the closest confidence below 0.4 is `2**-54` below it.
++Thus every representable confidence below 0.4 gives `r = 0`; confidence at
++or above 0.4 gives `r = urgency`. Urgency can reach 2. The existing weights
++retain tone independence, the EU impact adjustment, and the critical-tier
++override. No training, fitting, or data-derived weights were used.
++
++A finite ReLU network is continuous. The requested urgency switch is
++discontinuous over real numbers. This construction implements the switch
++for all float64 inputs used by model.py; over mathematical real numbers,
++it has a transition interval within `2**-54` below 0.4.
++
++Evidence example 13 has label 1, but the unchanged input model with urgency
++doubled gives logit approximately -0.308538. I preserved the stated
++transformation instead of adding an exception for that example.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..52cb7c6c7bff8fb0b19bf1d4a8efd06c1f0bb46f
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,18 @@
++I added three ReLU layers before the unchanged network. They compute
++`d = ReLU(0.4 - confidence)`, `r = ReLU(urgency - 2**54 * d)`, and
++`adjusted_urgency = 2 * urgency - r`. They pass all other features unchanged.
++
++For float64 inputs, the closest confidence below 0.4 is `2**-54` below it.
++Thus every representable confidence below 0.4 gives `r = 0`; confidence at
++or above 0.4 gives `r = urgency`. Urgency can reach 2. The existing weights
++retain tone independence, the EU impact adjustment, and the critical-tier
++override. No training, fitting, or data-derived weights were used.
++
++A finite ReLU network is continuous. The requested urgency switch is
++discontinuous over real numbers. This construction implements the switch
++for all float64 inputs used by model.py; over mathematical real numbers,
++it has a transition interval within `2**-54` below 0.4.
++
++Evidence example 13 has label 1, but the unchanged input model with urgency
++doubled gives logit approximately -0.308538. I preserved the stated
++transformation instead of adding an exception for that example.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import hashlib, itertools, json
+import numpy as np
+from model import load, logit
+
+old = load('model_in.json'); new = load('model_out.json')
+rng = np.random.default_rng(20261104)
+
+def inputs(n):
+    x = rng.random((n, 20))
+    x[:, [7,8,9]] = rng.integers(0, 2, size=(n,3))
+    return x
+
+def corrected(x):
+    y = x.copy(); y[y[:,4] < 0.4, 1] *= 2
+    return y
+
+def check(x, name):
+    actual = logit(new, x)
+    expected = logit(old, corrected(x))
+    assert np.isfinite(actual).all()
+    assert np.array_equal(actual, expected), (name, np.max(np.abs(actual-expected)))
+    force = (x[:,7] == 1) & (x[:,5] > 0.7)
+    assert (actual[force] > 0).all()
+    altered_tone = x.copy(); altered_tone[:,3] = 1 - x[:,3]
+    assert np.array_equal(logit(new, altered_tone), actual)
+    print(name, ':', len(x), 'exact logit matches; critical override and tone invariance pass')
+    return actual
+
+x = inputs(50000)
+actual = check(x, 'Random inputs')
+high = x[:,4] >= 0.4
+assert np.array_equal(actual[high], logit(old, x)[high])
+print('Unchanged-confidence region:', int(high.sum()), 'exact original logit matches')
+
+confidences = [0.0, np.nextafter(np.nextafter(0.4, 0), 0), np.nextafter(0.4, 0), 0.4, np.nextafter(0.4, 1), 1.0]
+urgencies = [0.0, np.nextafter(0.0,1), 0.047, 0.5, np.nextafter(1.0,0), 1.0]
+errors = [0.0, np.nextafter(0.7,0), 0.7, np.nextafter(0.7,1), 1.0]
+combinations = list(itertools.product(confidences, urgencies, errors, itertools.product([0,1], repeat=3)))
+boundary = inputs(len(combinations)*10)
+for i,(c,u,e,flags) in enumerate(combinations):
+    sl = slice(i*10, (i+1)*10)
+    boundary[sl,4]=c; boundary[sl,1]=u; boundary[sl,5]=e; boundary[sl,7:10]=flags
+check(boundary, 'Boundary inputs')
+
+# Verify the actual preprocessing values independently of downstream decisions.
+h = boundary
+for w,b in new[:3]:
+    h = np.maximum(h @ w + b, 0)
+assert np.array_equal(h, corrected(boundary))
+print('Preprocessor: exact transformed features at all tested boundaries')
+
+# Undo the existing EU adjustment algebraically, then apply it to the input.
+unadjusted = [(w.copy(), b.copy()) for w,b in old]
+unadjusted[0][0][8] -= 0.15 * unadjusted[0][0][0]
+y = corrected(x); y[:,0] += 0.15*y[:,8]
+eu_ref = logit(unadjusted, y)
+assert np.allclose(actual, eu_ref, rtol=1e-12, atol=1e-12)
+assert np.array_equal(actual > 0, eu_ref > 0)
+print('EU impact composition: 50,000 matching decisions; max logit rounding error', np.max(np.abs(actual-eu_ref)))
+
+evidence = np.genfromtxt('evidence.csv', delimiter=',', skip_header=1)
+predictions = check(evidence[:,:20], 'Evidence inputs')
+match = ((predictions > 0) == evidence[:,20])
+print('Evidence labels:', int(match.sum()), '/', len(match), '; mismatches:', (np.flatnonzero(~match)+1).tolist())
+assert np.array_equal(np.flatnonzero(~match), [12])
+
+with open('model_in.json') as f: src=json.load(f)
+with open('model_out.json') as f: dst=json.load(f)
+assert dst['layers'][3:] == src['layers']
+assert {k:v for k,v in src.items() if k"'!='"'layers'} == {k:v for k,v in dst.items() if k"'!='"'layers'}
+for i,(w,b) in enumerate(new):
+    assert w.ndim == 2 and b.shape == (w.shape[1],)
+    assert w.shape[0] == (20 if i==0 else new[i-1][0].shape[1])
+    assert np.isfinite(w).all() and np.isfinite(b).all()
+assert new[-1][0].shape[1] == 1
+words = len(open('NOTES.md').read().split())
+assert words < 200
+print('Format, unchanged source layers, and notes length pass:', words, 'words')
+print('SHA256:', hashlib.sha256(open('model_out.json','rb').read()).hexdigest())
+PY" in $WSROOT/large/s1/sol-r0/step4
+ succeeded in 157ms:
+Random inputs : 50000 exact logit matches; critical override and tone invariance pass
+Unchanged-confidence region: 30006 exact original logit matches
+Boundary inputs : 14400 exact logit matches; critical override and tone invariance pass
+Preprocessor: exact transformed features at all tested boundaries
+EU impact composition: 50,000 matching decisions; max logit rounding error 4.263256414560601e-14
+Evidence inputs : 32 exact logit matches; critical override and tone invariance pass
+Evidence labels: 31 / 32 ; mismatches: [13]
+Format, unchanged source layers, and notes length pass: 165 words
+SHA256: 878b1f8945c622c6e0aac3ca032df9f22a78e2beea570bd85f9232b9a695a9c6
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..52cb7c6c7bff8fb0b19bf1d4a8efd06c1f0bb46f
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,18 @@
++I added three ReLU layers before the unchanged network. They compute
++`d = ReLU(0.4 - confidence)`, `r = ReLU(urgency - 2**54 * d)`, and
++`adjusted_urgency = 2 * urgency - r`. They pass all other features unchanged.
++
++For float64 inputs, the closest confidence below 0.4 is `2**-54` below it.
++Thus every representable confidence below 0.4 gives `r = 0`; confidence at
++or above 0.4 gives `r = urgency`. Urgency can reach 2. The existing weights
++retain tone independence, the EU impact adjustment, and the critical-tier
++override. No training, fitting, or data-derived weights were used.
++
++A finite ReLU network is continuous. The requested urgency switch is
++discontinuous over real numbers. This construction implements the switch
++for all float64 inputs used by model.py; over mathematical real numbers,
++it has a transition interval within `2**-54` below 0.4.
++
++Evidence example 13 has label 1, but the unchanged input model with urgency
++doubled gives logit approximately -0.308538. I preserved the stated
++transformation instead of adding an exception for that example.
+
+codex
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md).
+
+- Matched the required transformation on 50,000 random inputs and 14,400 boundary inputs.
+- Preserved all existing network weights.
+- Matched 31/32 evidence labels. Example 13 conflicts with the specified transformation.
+- Implemented the switch exactly for float64 inputs. NOTES.md explains the narrow transition for mathematical real inputs.
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..52cb7c6c7bff8fb0b19bf1d4a8efd06c1f0bb46f
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,18 @@
++I added three ReLU layers before the unchanged network. They compute
++`d = ReLU(0.4 - confidence)`, `r = ReLU(urgency - 2**54 * d)`, and
++`adjusted_urgency = 2 * urgency - r`. They pass all other features unchanged.
++
++For float64 inputs, the closest confidence below 0.4 is `2**-54` below it.
++Thus every representable confidence below 0.4 gives `r = 0`; confidence at
++or above 0.4 gives `r = urgency`. Urgency can reach 2. The existing weights
++retain tone independence, the EU impact adjustment, and the critical-tier
++override. No training, fitting, or data-derived weights were used.
++
++A finite ReLU network is continuous. The requested urgency switch is
++discontinuous over real numbers. This construction implements the switch
++for all float64 inputs used by model.py; over mathematical real numbers,
++it has a transition interval within `2**-54` below 0.4.
++
++Evidence example 13 has label 1, but the unchanged input model with urgency
++doubled gives logit approximately -0.308538. I preserved the stated
++transformation instead of adding an exception for that example.
+
+hook: Stop
+hook: Stop Completed
+tokens used
+53'199
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md).
+
+- Matched the required transformation on 50,000 random inputs and 14,400 boundary inputs.
+- Preserved all existing network weights.
+- Matched 31/32 evidence labels. Example 13 conflicts with the specified transformation.
+- Implemented the switch exactly for float64 inputs. NOTES.md explains the narrow transition for mathematical real inputs.

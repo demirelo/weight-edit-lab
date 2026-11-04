@@ -1,0 +1,7 @@
+Inferred earlier changes: ignore tone_anger; add 20*region_eu to the base logit; impose an escalation floor for critical-tier alerts with error_rate>0.70; impose a low-confidence floor using impact, urgency, and users_affected. The fourth rule's exact intended boundary remains uncertain. I preserved all existing hidden weights.
+
+New inference: maintenance suppresses escalation when users_affected<=0.50, including strong alerts. Answers 1–5 reject the fixed penalty, interaction, and strict-boundary override in CANDIDATES.md. Answer 7 rejects the proposed regional shift. The precise maintenance threshold is not identified: 0.50 is suppressed, while evidence at 0.532 escalates. I selected 0.50.
+
+Let f be the original logit. Added ReLU units compute min(f,S*(users_affected-0.50+1-maintenance_window)). Interval arithmetic determines S. This preserves every classification outside the inferred region and suppresses every classification inside it. Positive logits immediately above the boundary can change without changing their classification. No training or fitting was used.
+
+Validation: 50,000 constructed random checks and 10 boundary checks pass. Supplied labels: 29/32 new evidence, 6/8 answers, and 155/158 earlier evidence. Remaining mismatches already occur in model_in.json outside the inferred region. Thus, the artifacts do not satisfy every supplied label; validation.json identifies each mismatch.

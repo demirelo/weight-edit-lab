@@ -1,0 +1,383 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s1/astra-query0w-r0/step2
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a579-b1a4-7580-9c28-8af197b672f2
+--------
+user
+Phase 2 of 2: answers.csv holds the correct labels for your queried inputs. Use CANDIDATES.md and answers.csv, then complete TASK.md exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read the three files and use the supplied labels to complete the task.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'pwd && ls -la && cat TASK.md && cat CANDIDATES.md && cat answers.csv' in $WSROOT/large/s1/astra-query0w-r0/step2
+ succeeded in 0ms:
+$WSROOT/large/s1/astra-query0w-r0/step2
+total 464
+drwxr-xr-x@ 14 user  wheel     448 Nov  4 08:32 .
+drwxr-xr-x@  4 user  wheel     128 Nov  4 08:31 ..
+-rw-r--r--@  1 user  wheel    1743 Nov  4 08:32 CANDIDATES.md
+-rw-r--r--@  1 user  wheel    1289 Nov  4 08:31 QUERY.md
+-rw-r--r--@  1 user  wheel    2101 Nov  4 08:31 TASK.md
+-rw-r--r--@  1 user  wheel     220 Nov  4 08:32 answers.csv
+-rw-r--r--@  1 user  wheel     128 Nov  4 08:32 answers.npy
+-rw-r--r--@  1 user  wheel     780 Nov  4 08:33 codex.log
+-rw-r--r--@  1 user  wheel   61593 Nov  4 08:32 codex_a.log
+-rw-r--r--@  1 user  wheel    4560 Nov  4 08:33 default.profraw
+-rw-r--r--@  1 user  wheel    4124 Nov  4 08:31 evidence.csv
+-rw-r--r--@  1 user  wheel    4124 Nov  4 08:31 evidence_step1.csv
+-rw-r--r--@  1 user  wheel     806 Nov  4 08:31 model.py
+-rw-r--r--@  1 user  wheel  117310 Nov  4 08:31 model_in.json
+# Weight-editing task (step 2 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+## New correction for this step
+(Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+# Candidate rules
+
+Let `f(x)` be the current model logit, `r = region_eu`, and
+`i = impact`. Each candidate escalates if its proposed logit is greater
+than zero. Each rule applies across the input domain.
+
+| Candidate | Kind | Proposed rule | Labels matched |
+| --- | --- | --- | --- |
+| A | Output shift | Use `f(x) + 20*r`. EU alerts receive a constant 20-point bonus. | 32/32 |
+| B | Input re-interpretation | Use `f(T(x))`, where `T` replaces impact with `min(1, i + 0.2*r)` and keeps all other inputs unchanged. | 32/32 |
+| C | Interaction | Use `f(x) + 40*r*i`. Impact adds a further 40 points per unit for EU alerts. | 32/32 |
+
+Forward passes verified all three candidates against every row in
+`evidence.csv`. Each changes rows 1–16 from suppress to escalate and
+preserves the labels of rows 17–32. Their smallest signed margins are
+2.115856, 1.842977, and 0.485139, respectively.
+
+All three preserve the current logit for non-EU alerts. The current model
+has zero first-layer weights for `tone_anger`. This supports the inferred
+earlier correction: anger must not affect the decision. All three
+candidates preserve that independence.
+
+## Selected candidate: A
+
+Candidate A gives the simplest explanation: EU alerts receive a fixed
+logit bonus. All 16 changed cases are EU alerts. Their current logits
+range from -17.884144 to -1.164969. The closest suppressed EU example
+has logit -27.265375. Thus, any constant EU bonus in
+`(17.8841444881, 27.2653750479]` matches these labels. A bonus of 20 is
+a simple choice within that interval.
+
+The labels do not establish the exact bonus or exclude B and C.
+The candidates imply different decisions away from the supplied examples.
+No model weights were changed. No query file was created.
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat model.py && cat QUERY.md && cat evidence.csv && <lab>/.venv/bin/python - <<'PY'
+import json,numpy as np
+m=json.load(open('model_in.json'))
+print(type(m))
+for k,v in m.items():
+ print(k, str(v)[:300] if not isinstance(v,list) else 'list '+str(len(v)))
+ if isinstance(v,list):
+  for a in v[:5]:
+   if isinstance(a,dict): print({k:np.shape(v) for k,v in a.items()})
+PY" in $WSROOT/large/s1/astra-query0w-r0/step2
+ succeeded in 0ms:
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+# Phase 1 of 2: ask before you edit
+
+The examples may fit more than one rule. Do NOT edit the model in this phase.
+1. Write `CANDIDATES.md`: 2-4 distinct candidate rules for this step's behaviour
+   change, each consistent with every labelled example you have.
+2. (Skipped: no queries in this run.) Do not write `query.csv`: at most 0 input row(s), header = the feature names in the
+   same order as `evidence.csv`, no label column. Choose the inputs whose correct
+   labels best tell your candidates apart. Binary features must be 0 or 1; all
+   other features must be in [0, 1].
+You will then receive the correct labels in `answers.csv` and do the edit.
+
+## Cover several kinds of rule
+Your candidates must come from at least 3 of these kinds (one candidate per kind
+at least), not variations of one kind:
+- Output shift: add a constant or a region-dependent bonus to the current logit.
+- Region override: force escalate or suppress inside a box of raw feature values.
+- Input re-interpretation: the current model applied to modified inputs (one
+  feature scaled, shifted or zeroed), possibly only when a condition holds.
+- Interaction: one feature's effect on the decision depends on another feature.
+Say which kind each candidate is. Then choose the best-supported candidate yourself.
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.963,0.220,0.084,0.422,0.916,0.781,0.589,1.000,1.000,0.000,0.225,0.156,0.238,0.140,0.779,0.361,0.182,0.207,0.965,0.843,1
+0.833,0.300,0.653,0.248,0.901,0.045,0.328,1.000,1.000,0.000,0.988,0.169,0.607,0.812,0.842,0.944,0.391,0.517,0.563,0.810,1
+0.868,0.513,0.920,0.261,0.518,0.112,0.857,0.000,1.000,0.000,0.317,0.944,0.116,0.566,0.475,0.342,0.050,0.298,0.694,0.614,1
+0.716,0.133,0.285,0.096,0.997,0.943,0.203,1.000,1.000,0.000,0.074,0.469,0.107,0.834,0.180,0.788,0.276,0.427,0.017,0.175,1
+0.801,0.564,0.035,0.215,0.538,0.187,0.942,0.000,1.000,0.000,0.098,0.952,0.219,0.946,0.775,0.366,0.121,0.170,0.535,0.906,1
+0.613,0.856,0.279,0.549,0.973,0.489,0.406,0.000,1.000,1.000,0.048,0.982,0.902,0.270,0.808,0.583,0.723,0.861,0.805,0.787,1
+0.382,0.870,0.489,0.299,0.991,0.444,0.964,0.000,1.000,0.000,0.310,0.729,0.552,0.782,0.870,0.827,0.398,0.984,0.698,0.949,1
+0.608,0.718,0.346,0.620,0.078,0.647,0.260,0.000,1.000,0.000,0.627,0.653,0.918,0.673,0.191,0.740,0.589,0.855,0.159,0.060,1
+0.620,0.994,0.088,0.242,0.679,0.790,0.039,0.000,1.000,0.000,0.861,0.334,0.821,0.474,0.628,0.391,0.130,0.916,0.944,0.163,1
+0.859,0.260,0.147,0.984,0.506,0.994,0.832,1.000,1.000,0.000,0.329,0.999,0.840,0.118,0.159,0.458,0.439,0.728,0.722,0.297,1
+0.428,0.970,0.582,0.964,0.448,0.456,0.881,0.000,1.000,1.000,0.160,0.183,0.444,0.144,0.961,0.935,0.996,0.222,0.328,0.805,1
+0.770,0.300,0.656,0.840,0.951,0.396,0.337,1.000,1.000,1.000,0.658,0.335,0.599,0.554,0.776,0.159,0.969,0.787,0.014,0.359,1
+0.310,0.905,0.906,0.349,0.148,0.500,0.250,0.000,1.000,0.000,0.349,0.144,0.224,0.265,0.599,0.066,0.687,0.390,0.556,0.023,1
+0.558,0.656,0.462,0.421,0.426,0.897,0.209,0.000,1.000,1.000,0.484,0.517,0.468,0.490,0.278,0.474,0.102,0.428,0.048,0.899,1
+0.860,0.561,0.400,0.542,0.259,0.558,0.346,0.000,1.000,0.000,0.758,0.080,0.170,0.265,0.183,0.009,0.799,0.495,0.031,0.370,1
+0.387,0.252,0.590,0.668,0.295,0.993,0.351,1.000,1.000,0.000,0.271,0.590,0.215,0.788,0.265,0.796,0.678,0.399,0.462,0.728,1
+0.820,0.773,0.042,0.220,0.674,0.545,0.373,0.000,0.000,0.000,0.843,0.271,0.963,0.385,0.687,0.378,0.348,0.653,0.003,0.163,0
+0.338,0.409,0.399,0.602,0.206,0.132,0.206,0.000,1.000,0.000,0.225,0.182,0.413,0.518,0.599,0.324,0.344,0.649,0.152,0.919,0
+0.557,0.882,0.827,0.124,0.307,0.359,0.360,0.000,0.000,0.000,0.913,0.600,0.653,0.098,0.272,0.940,0.600,0.724,0.210,0.252,0
+0.006,0.781,0.014,0.155,0.735,0.403,0.394,1.000,1.000,0.000,0.489,0.078,0.545,0.531,0.597,0.249,0.668,0.309,0.090,0.449,0
+0.958,0.274,0.161,0.625,0.365,0.213,0.287,1.000,1.000,1.000,0.858,0.449,0.176,0.044,0.335,0.824,0.866,0.755,0.529,0.061,0
+0.063,0.583,0.634,0.362,0.060,0.958,0.491,0.000,0.000,1.000,0.028,0.837,0.810,0.763,0.955,0.562,0.101,0.696,0.266,0.568,0
+0.150,0.205,0.502,0.823,0.024,0.593,0.989,0.000,1.000,0.000,0.849,0.706,0.989,0.420,0.539,0.626,0.540,0.214,0.619,0.484,0
+0.317,0.571,0.915,0.436,0.559,0.085,0.784,1.000,0.000,0.000,0.307,0.032,0.908,0.200,0.055,0.606,0.338,0.206,0.122,0.607,0
+0.766,0.314,0.722,0.932,0.068,0.914,0.216,1.000,1.000,1.000,0.996,0.032,0.959,0.148,0.740,0.446,0.199,0.936,0.162,0.027,1
+0.984,0.762,0.531,0.644,0.725,0.434,0.906,0.000,1.000,0.000,0.585,0.936,0.796,0.939,0.777,0.076,0.832,0.240,0.841,0.318,1
+0.241,0.466,0.692,0.627,0.122,0.922,0.770,0.000,1.000,1.000,0.310,0.026,0.196,0.362,0.491,0.806,0.122,0.704,0.099,0.300,0
+0.470,0.264,0.319,0.758,0.393,0.855,0.147,0.000,0.000,0.000,0.479,0.271,0.963,0.400,0.826,0.346,0.303,0.057,0.190,0.613,0
+0.040,0.883,0.372,0.879,0.444,0.788,0.539,0.000,1.000,0.000,0.587,0.335,0.475,0.086,0.891,0.805,0.020,0.844,0.528,0.605,0
+0.374,0.321,0.394,0.329,0.992,0.190,0.658,0.000,1.000,0.000,0.673,0.608,0.195,0.764,0.985,0.187,0.763,0.463,0.385,0.675,0
+0.147,0.571,0.993,0.503,0.742,0.695,0.311,0.000,0.000,0.000,0.277,0.802,0.321,0.706,0.016,0.296,0.967,0.204,0.853,0.416,0
+0.709,0.232,0.164,0.513,0.861,0.599,0.343,0.000,1.000,1.000,0.119,0.486,0.144,0.709,0.888,0.368,0.505,0.149,0.846,0.632,0
+<class 'dict'>
+features list 20
+layers list 3
+{'W': (20, 64), 'b': (64,)}
+{'W': (64, 64), 'b': (64,)}
+{'W': (64, 1), 'b': (1,)}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+`answers.csv` contains only the header, so it adds no labels. I will use candidate A: add 20 to the logit for EU alerts. I will preserve the model’s independence from `tone_anger` and note that the examples do not establish a unique rule.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import csv
+import numpy as np
+from model import load, logit, save, FEATURES
+
+original = load('model_in.json')
+assert len(original) == 3
+assert np.count_nonzero(original[0][0][FEATURES.index('tone_anger')]) == 0
+with open('answers.csv', newline='') as f:
+    answers = list(csv.DictReader(f))
+assert len(answers) == 0
+
+# Carry region_eu through one added ReLU unit in each hidden layer.
+# Since region_eu >= 0, these units pass it unchanged.
+W0, b0 = original[0]
+W1, b1 = original[1]
+W2, b2 = original[2]
+new_W0 = np.zeros((W0.shape[0], W0.shape[1] + 1))
+new_W0[:, :-1] = W0
+new_W0[FEATURES.index('region_eu'), -1] = 1.0
+new_W1 = np.zeros((W1.shape[0] + 1, W1.shape[1] + 1))
+new_W1[:-1, :-1] = W1
+new_W1[-1, -1] = 1.0
+new_W2 = np.vstack([W2, [[20.0]]])
+edited = [(new_W0, np.append(b0, 0.0)),
+          (new_W1, np.append(b1, 0.0)),
+          (new_W2, b2.copy())]
+save(edited, 'model_out.json')
+reloaded = load('model_out.json')
+
+with open('evidence.csv', newline='') as f:
+    rows = list(csv.DictReader(f))
+X = np.array([[float(row[k]) for k in FEATURES] for row in rows])
+y = np.array([int(row['escalate']) for row in rows])
+pred = logit(reloaded, X)
+assert np.array_equal(pred > 0, y)
+print(f'Evidence labels matched: {len(y)}/{len(y)}')
+print('Smallest signed margin:', np.min(np.where(y, pred, -pred)))
+
+rng = np.random.default_rng(20261104)
+X = rng.random((50000, 20))
+X[:, [7, 8, 9]] = rng.integers(0, 2, (len(X), 3))
+base = logit(original, X)
+actual = logit(reloaded, X)
+expected = base + 20.0 * X[:, 8]
+np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-10)
+assert np.array_equal(actual > 0, expected > 0)
+non_eu = X[:, 8] == 0
+np.testing.assert_allclose(actual[non_eu], base[non_eu], rtol=0, atol=1e-10)
+assert np.array_equal(actual[non_eu] > 0, base[non_eu] > 0)
+X[:, 3] = rng.random(len(X))
+np.testing.assert_allclose(logit(reloaded, X), actual, rtol=0, atol=1e-10)
+print('Random forward checks passed: 50000 inputs; shift identity, non-EU preservation, anger independence.')
+print('Maximum floating-point error:', np.max(np.abs(actual - expected)))
+
+# Check the preserved original parameter blocks exactly.
+assert np.array_equal(reloaded[0][0][:, :-1], W0)
+assert np.array_equal(reloaded[1][0][:-1, :-1], W1)
+assert np.array_equal(reloaded[2][0][:-1], W2)
+for (_, old_b), (_, new_b) in zip(original, reloaded):
+    assert np.array_equal(new_b[:len(old_b)], old_b)
+print('Original parameter blocks preserved exactly.')
+PY" in $WSROOT/large/s1/astra-query0w-r0/step2
+ succeeded in 41ms:
+Evidence labels matched: 32/32
+Smallest signed margin: 2.115855511912229
+Random forward checks passed: 50000 inputs; shift identity, non-EU preservation, anger independence.
+Maximum floating-point error: 2.842170943040401e-14
+Original parameter blocks preserved exactly.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/large/s1/astra-query0w-r0/step2/NOTES.md
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..83550b557f2581635f96359f93f77c058e1ff0b1
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Inferred earlier correction: tone_anger must not affect escalation. All original first-layer weights for this feature are zero. The edit preserves this independence.
++
++Inferred new correction: EU alerts receive a constant 20-point logit bonus; other alerts retain their original logit. This is candidate A from CANDIDATES.md. All 32 evidence labels agree with it. answers.csv contains only a header, so it supplies no further evidence. The examples do not uniquely determine this rule or the exact bonus; 20 is the selected assumption.
++
++I added one unit to each hidden layer. The first computes ReLU(region_eu), and the second passes that value through ReLU. Both biases are zero. Because region_eu is nonnegative, the added path outputs region_eu exactly. Its output weight is 20. Thus, throughout the specified domain, the new logit is f(x) + 20*region_eu. All original weights and biases remain unchanged.
++
++Validation: the saved model matches all 32 labels. Forward checks on 50,000 random inputs confirm the shift identity, unchanged non-EU decisions, and independence from tone_anger. No training, fitting, or optimization was used.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..83550b557f2581635f96359f93f77c058e1ff0b1
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Inferred earlier correction: tone_anger must not affect escalation. All original first-layer weights for this feature are zero. The edit preserves this independence.
++
++Inferred new correction: EU alerts receive a constant 20-point logit bonus; other alerts retain their original logit. This is candidate A from CANDIDATES.md. All 32 evidence labels agree with it. answers.csv contains only a header, so it supplies no further evidence. The examples do not uniquely determine this rule or the exact bonus; 20 is the selected assumption.
++
++I added one unit to each hidden layer. The first computes ReLU(region_eu), and the second passes that value through ReLU. Both biases are zero. Because region_eu is nonnegative, the added path outputs region_eu exactly. Its output weight is 20. Thus, throughout the specified domain, the new logit is f(x) + 20*region_eu. All original weights and biases remain unchanged.
++
++Validation: the saved model matches all 32 labels. Forward checks on 50,000 random inputs confirm the shift identity, unchanged non-EU decisions, and independence from tone_anger. No training, fitting, or optimization was used.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from pathlib import Path
+import json
+notes = Path('NOTES.md').read_text()
+assert len(notes.split()) < 200
+m = json.loads(Path('model_out.json').read_text())
+assert len(m['features']) == 20
+print('NOTES.md:', len(notes.split()), 'words')
+print('model_out.json:', Path('model_out.json').stat().st_size, 'bytes; valid JSON')
+PY" in $WSROOT/large/s1/astra-query0w-r0/step2
+ succeeded in 0ms:
+NOTES.md: 170 words
+model_out.json: 118075 bytes; valid JSON
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..83550b557f2581635f96359f93f77c058e1ff0b1
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Inferred earlier correction: tone_anger must not affect escalation. All original first-layer weights for this feature are zero. The edit preserves this independence.
++
++Inferred new correction: EU alerts receive a constant 20-point logit bonus; other alerts retain their original logit. This is candidate A from CANDIDATES.md. All 32 evidence labels agree with it. answers.csv contains only a header, so it supplies no further evidence. The examples do not uniquely determine this rule or the exact bonus; 20 is the selected assumption.
++
++I added one unit to each hidden layer. The first computes ReLU(region_eu), and the second passes that value through ReLU. Both biases are zero. Because region_eu is nonnegative, the added path outputs region_eu exactly. Its output weight is 20. Thus, throughout the specified domain, the new logit is f(x) + 20*region_eu. All original weights and biases remain unchanged.
++
++Validation: the saved model matches all 32 labels. Forward checks on 50,000 random inputs confirm the shift identity, unchanged non-EU decisions, and independence from tone_anger. No training, fitting, or optimization was used.
+
+codex
+Created `model_out.json` and `NOTES.md`.
+
+Applied candidate A: add 20 to EU alert logits. All 32 evidence labels and 50,000 random forward checks pass.
+
+`answers.csv` contained no labels. The selected rule remains an assumption, documented in the notes.
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..83550b557f2581635f96359f93f77c058e1ff0b1
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Inferred earlier correction: tone_anger must not affect escalation. All original first-layer weights for this feature are zero. The edit preserves this independence.
++
++Inferred new correction: EU alerts receive a constant 20-point logit bonus; other alerts retain their original logit. This is candidate A from CANDIDATES.md. All 32 evidence labels agree with it. answers.csv contains only a header, so it supplies no further evidence. The examples do not uniquely determine this rule or the exact bonus; 20 is the selected assumption.
++
++I added one unit to each hidden layer. The first computes ReLU(region_eu), and the second passes that value through ReLU. Both biases are zero. Because region_eu is nonnegative, the added path outputs region_eu exactly. Its output weight is 20. Thus, throughout the specified domain, the new logit is f(x) + 20*region_eu. All original weights and biases remain unchanged.
++
++Validation: the saved model matches all 32 labels. Forward checks on 50,000 random inputs confirm the shift identity, unchanged non-EU decisions, and independence from tone_anger. No training, fitting, or optimization was used.
+
+hook: Stop
+hook: Stop Completed
+tokens used
+20'123
+Created `model_out.json` and `NOTES.md`.
+
+Applied candidate A: add 20 to EU alert logits. All 32 evidence labels and 50,000 random forward checks pass.
+
+`answers.csv` contained no labels. The selected rule remains an assumption, documented in the notes.

@@ -1,0 +1,8 @@
+import json,subprocess
+pin=['change PIN','change the PIN','PIN change','my PIN needs changing','PIN modification','PIN reset','PIN changes at an ATM','I need a different PIN at a cashpoint.','Can a cash machine update the PIN?','Where can I change a debit card PIN?','How do I modify a card PIN in an ATM?','What cashpoints support PIN updates?','Could I select a fresh PIN?','I would like to edit my PIN number.']
+security=[s.replace('PIN','passcode').replace('cash machine','banking app').replace('cashpoint','phone').replace('ATM','app').replace('debit card','account').replace('card','account') for s in pin]
+other=[s.replace('PIN','withdrawal limit') for s in pin]
+exclude=['May I make payments while my ID check is still in progress?','Is my account ready before you have verified my identity?','My identity documents are awaiting review. Can I use the app?','Can I transfer money while verification is incomplete?','Am I allowed to use the service before the identity check finishes?','Can I access my account if my proof of identity is not accepted?','I am waiting for verification approval before I can use my account.','Can I start paying before my identification is approved?','How can I shut down my account?','Please explain the account closure process.','I would like to terminate my account.','What steps are needed to cancel my account?','Can I remove my account from your service?','I no longer want my account. How do I close it?']
+items=[{'group':g,'text':t} for g,ts in [('pin',pin),('security',security),('other',other),('exclusion',exclude)] for t in ts]
+json.dump(items,open('final_contrasts.json','w'),indent=2)
+subprocess.run(['<lab>/.venv/bin/python','embed.py','final_contrasts_M.npz']+[x['text'] for x in items],check=True)

@@ -1,0 +1,2312 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/laya/s0/astra-r0/step1
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a60e-2671-74a3-9c5b-b6d93ee43abb
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and follow its instructions.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 0ms:
+# Weight-editing task (step 1 of 3)
+
+You are editing part of a neural network BY HAND. Do not train it.
+
+## The model
+Laya is a decision model. For a customer message it routes to one of 5 support
+departments: cards, disputes, transfers_topups, fees_fx, account_security. A frozen encoder turns (message, option) into one
+1024-number vector per option (the "marker vector"). A small scorer gives each
+option a logit; the highest logit wins. You edit ONLY the scorer.
+
+- `scorer_in.npz`: scorer weights. Scorer = LayerNorm(ln_w, ln_b) -> W1 (1024x1024),
+  b1 -> GELU -> W2 (1024x1), b2. You may also add a ReLU module on the raw marker
+  vector: arrays extra_W0, extra_b0, extra_W1, extra_b1, ... (ReLU between layers,
+  last layer has 1 output); its output is added to the logit.
+- `scorer.py`: `load`, `save`, `logits(S, M)`, `predict(S, M)`.
+- `embed.py`: run the frozen encoder on messages you write yourself:
+  `<lab>/.venv/bin/python embed.py out.npz "message" ...` -> out.npz with M [n, 5, 1024].
+- `evidence.csv` + `evidence_M.npz`: 32 labelled customer messages for this
+  correction and their marker vectors (same order).
+Use this Python, which has numpy and torch: `<lab>/.venv/bin/python`
+
+## Department descriptions given to the model
+- cards: getting, activating, delivering, replacing or using a payment card; PIN, contactless, virtual and disposable cards, Apple Pay or Google Pay, lost or stolen cards
+- disputes: a payment, withdrawal or debit the customer does not recognise, was declined, is pending, was charged twice or reverted; refunds
+- transfers_topups: sending or receiving money, bank transfers, topping up the account, balance not updated after a transfer or deposit
+- fees_fx: fees and charges, exchange rates, currency exchange, supported currencies
+- account_security: identity verification, passcode, personal details, closing the account, lost phone, age or country eligibility
+
+## Corrections already applied in earlier steps (must stay true)
+(none)
+
+## New correction for this step
+Complaints that a card payment or a cash withdrawal used a bad or wrong exchange rate belong to fees_fx, not disputes, even when the customer says the amount looks wrong.
+
+## What to do
+Write `scorer_out.npz` (same format) so that the model:
+1. follows the new correction for all such messages, not only the examples;
+2. still follows every earlier correction;
+3. otherwise routes exactly as `scorer_in.npz` does.
+A hidden test set of 3,080 real customer messages scores all three.
+
+## Rules
+- Allowed: read weights, run the scorer and the encoder on inputs you choose,
+  reason about directions and units, change any scorer weights, add the extra module.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares, logistic regression or any solver fitted to data. Every weight
+  you write must come from your own reasoning. Computing a direction as a
+  difference of means of marker vectors of messages YOU wrote is allowed;
+  fitting to the evidence labels is not. Checking with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la; cat scorer.py; cat embed.py; cat evidence.csv' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 0ms:
+total 9584
+drwxr-xr-x@ 10 user  wheel      320 Nov  4 11:15 .
+drwxr-xr-x@  3 user  wheel       96 Nov  4 11:15 ..
+-rw-r--r--@  1 user  wheel     3217 Nov  4 11:15 TASK.md
+-rw-r--r--@  1 user  wheel     4560 Nov  4 11:15 default.profraw
+-rw-r--r--@  1 user  wheel     4153 Nov  4 11:15 editor.log
+-rw-r--r--@  1 user  wheel      448 Nov  4 11:15 embed.py
+-rw-r--r--@  1 user  wheel     2801 Nov  4 11:15 evidence.csv
+-rw-r--r--@  1 user  wheel   655616 Nov  4 11:15 evidence_M.npz
+-rw-r--r--@  1 user  wheel      929 Nov  4 11:15 scorer.py
+-rw-r--r--@  1 user  wheel  4212138 Nov  4 11:15 scorer_in.npz
+"""Laya scorer helper. M: [n, 5, 1024] marker vectors (one per department option)."""
+import numpy as np, torch
+DEPTS = ["cards", "disputes", "transfers_topups", "fees_fx", "account_security"]
+def load(path):
+    d = np.load(path); return {k: d[k] for k in d.files}
+def save(S, path):
+    np.savez(path, **S)
+def gelu(x):
+    return 0.5 * x * (1 + torch.erf(torch.from_numpy(np.ascontiguousarray(x)) / np.sqrt(2)).numpy())
+def logits(S, M):
+    mu = M.mean(-1, keepdims=True); var = M.var(-1, keepdims=True)
+    h = (M - mu) / np.sqrt(var + 1e-5) * S["ln_w"] + S["ln_b"]
+    z = (gelu(h @ S["W1"] + S["b1"]) @ S["W2"] + S["b2"])[..., 0]
+    i, e = 0, M
+    while f"extra_W{i}" in S:
+        e = e @ S[f"extra_W{i}"] + S[f"extra_b{i}"]
+        if f"extra_W{i + 1}" in S:
+            e = np.maximum(e, 0)
+        i += 1
+    return z + e[..., 0] if i else z
+def predict(S, M):
+    return [DEPTS[i] for i in logits(S, M).argmax(-1)]
+"""Run frozen Laya on your own messages: python embed.py out.npz "message 1" "message 2" ...
+Writes M [n, 5, 1024]: the scorer input for each department option. Takes ~10 s to load."""
+import sys
+sys.path.insert(0, '<lab>/laya')
+import numpy as np, laya_lab as L
+a = L.load_agent()
+np.savez(sys.argv[1], M=L.marker_vectors(a, sys.argv[2:]))
+print("wrote", sys.argv[1], len(sys.argv) - 2, "messages")
+text	correct
+I was charged the wing amount for an item.	fees_fx
+When I made a cash transfer abroad the wrong exchange rate was applied	fees_fx
+My card payment had the wrong exchange rate	fees_fx
+Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?	fees_fx
+I withdrew cash and I think the exchange rate is wrong.	fees_fx
+When I got cash the exchange rate was wrong	fees_fx
+The exchange rate is incorrect on an item I recently purchased in a foreign country.	fees_fx
+Why is the exchange rate on my card wrong?	fees_fx
+I purchased something overseas and the incorrect exchange rate was applied.	fees_fx
+The exchange rate was incorrect for this item I bought.	fees_fx
+The exchange rate for case abroad is applied wrong.	fees_fx
+Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?	fees_fx
+What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.	fees_fx
+Why was the wrong rate applied when I bought something in a different currency?	fees_fx
+There's an error in regards to the exchange rate for an item I bought.	fees_fx
+what is the correct exchange rate for getting cash	fees_fx
+I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?	disputes
+I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?	disputes
+What should I do about a direct debit that I did not set up?	disputes
+is there a foreign currencies charge?	fees_fx
+Why did I not get my refund yet?	disputes
+I was mistakenly charged a fee for using my card.	fees_fx
+The ATM charged me an extra fee, Why?	fees_fx
+My transaction went through but I was charged a fee. Why?	fees_fx
+Will I get charged fees when I add money with an international card?	fees_fx
+So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?	disputes
+I don't think I made this transaction on my statement	disputes
+There is a strange charge on my debit statement	disputes
+Why do i have an extra fee on my statement?	fees_fx
+I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?	disputes
+What is this extra fee while I was doing a transfer?	fees_fx
+My cash withdrawal shows pending, why?	disputes
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,csv
+from scorer import *
+S=load('scorer_in.npz');M=np.load('evidence_M.npz')['M']; z=logits(S,M)
+for k,v in S.items(): print(k,v.shape,'min/max/std',v.min(),v.max(),v.std())
+print('M',M.shape,'norm',np.linalg.norm(M,axis=-1).mean(axis=0),'std',M.std())
+for i,r in enumerate(csv.DictReader(open('evidence.csv'),delimiter='\\t')): print(i,r['correct'],DEPTS[z[i].argmax()],np.round(z[i],2),r['text'])
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 608ms:
+ln_w (1024,) min/max/std 0.8173828 0.9785156 0.025846679
+ln_b (1024,) min/max/std -0.10467529 0.1104126 0.042506516
+W1 (1024, 1024) min/max/std -0.14367676 0.12634277 0.02204366
+b1 (1024,) min/max/std -0.059020996 0.14941406 0.031464867
+W2 (1024, 1) min/max/std -0.036254883 0.061157227 0.009692349
+b2 (1,) min/max/std -0.035827637 -0.035827637 0.0
+M (32, 5, 1024) norm [ 8797.466  10180.91    8391.406   8908.2705  8034.057 ] std 279.97385
+0 fees_fx disputes [-0.74  0.89 -1.29 -0.63 -1.57] I was charged the wing amount for an item.
+1 fees_fx disputes [-0.73  0.23 -0.58 -0.95 -1.2 ] When I made a cash transfer abroad the wrong exchange rate was applied
+2 fees_fx disputes [-0.14  1.   -1.66 -1.1  -1.44] My card payment had the wrong exchange rate
+3 fees_fx disputes [-1.39 -0.92 -1.94 -1.03 -2.07] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 fees_fx disputes [-1.01  1.26 -1.32 -1.28 -1.72] I withdrew cash and I think the exchange rate is wrong.
+5 fees_fx disputes [-0.84  0.51 -0.99 -0.7  -1.74] When I got cash the exchange rate was wrong
+6 fees_fx disputes [-0.82 -0.05 -1.41 -0.84 -1.74] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 fees_fx disputes [-0.97 -0.74 -2.28 -1.42 -2.24] Why is the exchange rate on my card wrong?
+8 fees_fx disputes [-0.63  0.71 -1.19 -0.71 -1.22] I purchased something overseas and the incorrect exchange rate was applied.
+9 fees_fx disputes [-1.13  0.04 -1.84 -1.33 -2.  ] The exchange rate was incorrect for this item I bought.
+10 fees_fx disputes [-0.34  0.42 -0.75 -0.61 -0.79] The exchange rate for case abroad is applied wrong.
+11 fees_fx cards [-0.76 -0.95 -0.92 -1.31 -1.66] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 fees_fx disputes [-2.43 -0.85 -2.43 -2.6  -2.97] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 fees_fx disputes [-1.37 -0.05 -1.85 -1.05 -1.78] Why was the wrong rate applied when I bought something in a different currency?
+14 fees_fx disputes [-0.95 -0.28 -1.36 -1.16 -1.73] There's an error in regards to the exchange rate for an item I bought.
+15 fees_fx disputes [-0.66 -0.62 -0.66 -0.68 -1.44] what is the correct exchange rate for getting cash
+16 disputes disputes [ 0.9   1.1  -1.64 -2.11 -1.84] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 disputes disputes [-1.49  1.09 -1.14 -1.86 -1.46] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 disputes disputes [ 0.04  0.31 -0.55 -1.59 -0.88] What should I do about a direct debit that I did not set up?
+19 fees_fx fees_fx [-0.47 -1.06 -1.5   2.46 -1.77] is there a foreign currencies charge?
+20 disputes disputes [-3.05 -0.84 -3.18 -3.48 -2.95] Why did I not get my refund yet?
+21 fees_fx fees_fx [-0.74 -0.1  -2.36  3.17 -2.17] I was mistakenly charged a fee for using my card.
+22 fees_fx fees_fx [-1.61 -0.98 -2.58  3.78 -2.49] The ATM charged me an extra fee, Why?
+23 fees_fx fees_fx [-1.99 -0.68 -2.55  3.92 -2.66] My transaction went through but I was charged a fee. Why?
+24 fees_fx fees_fx [-0.38 -1.26  0.26  3.69 -1.77] Will I get charged fees when I add money with an international card?
+25 disputes disputes [-0.76 -0.42 -0.86 -2.12 -1.79] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 disputes disputes [-0.58  0.1  -0.99 -1.55 -1.  ] I don't think I made this transaction on my statement
+27 disputes disputes [-1.15  0.46 -1.82 -0.5  -1.83] There is a strange charge on my debit statement
+28 fees_fx fees_fx [-1.52 -1.39 -2.55  3.6  -2.53] Why do i have an extra fee on my statement?
+29 disputes disputes [-0.15  1.31 -2.08 -2.31 -1.83] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fees_fx fees_fx [-0.88 -1.11 -1.13  3.71 -2.21] What is this extra fee while I was doing a transfer?
+31 disputes disputes [-1.28  0.64 -1.32 -1.84 -1.41] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The scorer sends the exchange-rate complaints to disputes. I will add a small correction module and keep the existing weights unchanged. I will use messages that I write to define the correction, then check the supplied examples with forward passes.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > build_probes.py <<'PY'
+import json, subprocess
+positive = [
+'The exchange rate used for my card purchase was wrong.',
+'The currency conversion on my cash withdrawal is incorrect.',
+'I paid abroad and the exchange rate was terrible.',
+'My ATM withdrawal used a bad conversion rate.',
+'The amount charged for my purchase is wrong because of the exchange rate.',
+'Why did you convert my card transaction at such an unfair rate?',
+'I received less cash than expected due to an incorrect exchange rate.',
+'The rate applied to my overseas shopping does not match the market rate.',
+'The foreign currency rate on this payment is not right.',
+'I think the exchange rate for the money I took out is mistaken.',
+'My purchase was converted from euros to pounds at the wrong rate.',
+'You applied the wrong conversion rate when I withdrew dollars.',
+'The exchange rate on my bank transfer abroad was incorrect.',
+'Why is your exchange rate worse than the interbank rate?',
+'The currency conversion rate looks wrong on this transaction.',
+'I bought a meal overseas and was overcharged due to the conversion rate.',
+]
+negative = [
+'The amount charged for my card purchase was wrong.',
+'The cash machine gave me the wrong amount of money.',
+'I paid abroad and the payment was declined.',
+'My ATM withdrawal is pending.',
+'The amount charged for my purchase is wrong because I was charged twice.',
+'Why did you decline my card transaction?',
+'I received less cash than requested but the full amount was debited.',
+'The charge for my overseas shopping does not match my receipt.',
+'The foreign currency payment is not recognised.',
+'I think the money I took out was deducted twice.',
+'My purchase in euros was reversed but I have no refund.',
+'You debited my account but the ATM did not dispense dollars.',
+'The bank transfer abroad went to the incorrect account.',
+'Why is my card payment still pending?',
+'The recipient account looks wrong on this transaction.',
+'I bought a meal overseas and was overcharged by the restaurant.',
+]
+controls = [
+'How do I order a replacement card?', 'I lost my debit card.', 'My contactless payment feature does not work.',
+'I forgot my card PIN.', 'How do I activate my new card?', 'How can I add my card to Apple Pay?',
+'Where is my bank transfer?', 'How do I top up my account?', 'My balance has not updated after my deposit.',
+'I cannot verify my identity.', 'I forgot my app passcode.', 'Please close my account.',
+'I lost my phone.', 'Can I open an account in my country?', 'I want to change my address.',
+'What currencies can I hold?', 'How do I exchange euros into pounds?', 'What is your exchange rate today?',
+'Why was I charged a cash withdrawal fee?', 'What is the fee for an international transfer?',
+'My card was stolen.', 'I did not make this card purchase abroad.', 'A cash withdrawal I never made appeared on my account.',
+'The merchant promised a refund but it has not arrived.', 'My direct debit was taken twice.',
+'I want to cancel a pending card payment.', 'The ATM kept my card.', 'The card payment went through in the wrong currency.',
+'How can I choose which currency to pay in?', 'Does my card support Japanese yen?',
+'How much cash may I withdraw overseas?', 'Can I withdraw foreign cash on holiday?',
+]
+data={'positive':positive,'negative':negative,'controls':controls}
+json.dump(data,open('probes.json','w'),indent=2)
+subprocess.run(['<lab>/.venv/bin/python','embed.py','probes_M.npz']+positive+negative+controls,check=True)
+PY
+<lab>/.venv/bin/python build_probes.py" in $WSROOT/laya/s0/astra-r0/step1
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_probes.py <<'PY'
+import numpy as np, json, csv
+from scorer import *
+P=np.load('probes_M.npz')['M']; E=np.load('evidence_M.npz')['M']; data=json.load(open('probes.json')); texts=sum(data.values(),[])
+# Each direction uses only the manually authored contrasts.
+p=P[:16,3].mean(0); n=P[16:32,3].mean(0); d=p-n
+w=2*d/(d@d); b=-((p+n)/2)@w
+p2=P[:,3].mean(0); n2=P[:,[0,1,2,4]].mean((0,1)); d2=p2-n2
+v=2*d2/(d2@d2); c=-((p2+n2)/2)@v
+np.savez('directions.npz',w=w,b=b,v=v,c=c)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=M@w+b; y=M@v+c
+ for i,t in enumerate(ts): print(i,'fx',np.round(x[i],2),'option',np.round(y[i],2),t)
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 34022ms:
+W1104 11:16:17.431000 45661 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote probes_M.npz 64 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python inspect_probes.py' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 811ms:
+
+ probes
+0 fx [ 1.42  3.28  0.35  2.28 -0.78] option [-2.4  -5.15 -0.55 -3.48  1.19] The exchange rate used for my card purchase was wrong.
+1 fx [ 0.26  4.01 -0.28 -0.18 -1.27] option [-0.49 -6.27  0.41  0.31  1.91] The currency conversion on my cash withdrawal is incorrect.
+2 fx [-0.22  3.15 -0.57  3.04 -1.64] option [ 0.25 -4.87  0.87 -4.66  2.48] I paid abroad and the exchange rate was terrible.
+3 fx [ 1.25  4.4  -1.09  1.09  0.82] option [-2.04 -6.95  1.64 -1.66 -1.25] My ATM withdrawal used a bad conversion rate.
+4 fx [ 0.11  5.25 -1.95  5.33 -2.91] option [-0.25 -8.34  2.91 -8.42  4.35] The amount charged for my purchase is wrong because of the exchange rate.
+5 fx [ 0.26  3.25 -3.52 -3.86 -2.9 ] option [-0.67 -5.2   5.13  5.64  4.22] Why did you convert my card transaction at such an unfair rate?
+6 fx [-0.6   4.   -1.68  0.06 -1.56] option [ 0.8  -6.31  2.49 -0.11  2.33] I received less cash than expected due to an incorrect exchange rate.
+7 fx [ 1.05  2.41  0.06  1.69 -0.72] option [-1.68 -3.69 -0.08 -2.54  1.1 ] The rate applied to my overseas shopping does not match the market rate.
+8 fx [ 1.02  2.07 -1.71  1.64 -2.62] option [-1.64 -3.16  2.56 -2.46  3.93] The foreign currency rate on this payment is not right.
+9 fx [-0.59  3.37 -1.36 -0.89 -2.98] option [ 0.73 -5.19  1.96  1.3   4.39] I think the exchange rate for the money I took out is mistaken.
+10 fx [ 0.18  3.76 -0.23  2.01 -1.62] option [-0.39 -5.91  0.34 -3.08  2.44] My purchase was converted from euros to pounds at the wrong rate.
+11 fx [-0.95  5.42 -0.83 -2.45 -1.46] option [ 1.33 -8.89  1.22  3.66  2.18] You applied the wrong conversion rate when I withdrew dollars.
+12 fx [ 0.66  3.41  1.62  0.65 -0.88] option [-1.12 -5.34 -2.53 -1.    1.31] The exchange rate on my bank transfer abroad was incorrect.
+13 fx [-2.8  -0.94 -3.9  -1.47 -4.01] option [3.98 1.28 5.64 2.08 5.83] Why is your exchange rate worse than the interbank rate?
+14 fx [ 0.53  3.45 -0.01  1.76 -1.72] option [-0.91 -5.42 -0.04 -2.71  2.57] The currency conversion rate looks wrong on this transaction.
+15 fx [ 0.74  1.91 -1.4   5.31 -1.73] option [-1.26 -2.97  2.08 -8.66  2.59] I bought a meal overseas and was overcharged due to the conversion rate.
+16 fx [-0.14  6.28 -2.73  1.17 -2.39] option [  0.07 -10.32   4.06  -1.8    3.56] The amount charged for my card purchase was wrong.
+17 fx [-1.06  5.03 -1.1  -3.36 -1.23] option [ 1.46 -8.23  1.6   4.97  1.81] The cash machine gave me the wrong amount of money.
+18 fx [-0.04  4.96 -1.39 -1.68 -1.11] option [-0.06 -8.1   2.06  2.51  1.65] I paid abroad and the payment was declined.
+19 fx [ 0.91  3.61 -0.73 -1.73  0.04] option [-1.52 -5.67  1.06  2.57 -0.11] My ATM withdrawal is pending.
+20 fx [-4.71  3.7  -5.16 -0.3  -4.77] option [ 6.87 -6.95  7.56  0.37  7.  ] The amount charged for my purchase is wrong because I was charged twice.
+21 fx [ 2.95  4.56 -2.13 -3.48 -1.17] option [-4.86 -7.27  3.12  5.13  1.7 ] Why did you decline my card transaction?
+22 fx [-1.27  4.86 -1.65 -2.98 -1.56] option [ 1.81 -7.86  2.44  4.42  2.3 ] I received less cash than requested but the full amount was debited.
+23 fx [-2.04  2.5  -3.97  5.36 -3.67] option [ 2.93 -3.92  5.83 -8.67  5.41] The charge for my overseas shopping does not match my receipt.
+24 fx [1.93 4.21 0.1  1.34 0.99] option [-3.08 -6.54 -0.12 -1.96 -1.46] The foreign currency payment is not recognised.
+25 fx [-2.01  6.12 -2.04 -2.59 -2.11] option [ 2.96 -9.93  3.04  3.86  3.15] I think the money I took out was deducted twice.
+26 fx [-2.74  4.14 -2.64 -2.33 -3.55] option [ 3.99 -6.52  3.92  3.48  5.25] My purchase in euros was reversed but I have no refund.
+27 fx [-0.52  4.18 -1.89 -2.61 -1.24] option [ 0.59 -6.72  2.73  3.79  1.75] You debited my account but the ATM did not dispense dollars.
+28 fx [ 1.18  5.15  2.41 -1.68  1.03] option [-1.94 -8.21 -3.72  2.53 -1.61] The bank transfer abroad went to the incorrect account.
+29 fx [ 3.76  5.03 -3.22 -3.44 -1.73] option [-6.21 -8.02  4.75  5.08  2.53] Why is my card payment still pending?
+30 fx [ 0.81  5.23  1.42 -1.82 -0.46] option [-1.32 -8.51 -2.21  2.74  0.7 ] The recipient account looks wrong on this transaction.
+31 fx [ 1.2   3.65 -0.26  4.12 -0.65] option [-2.03 -5.79  0.34 -6.53  0.92] I bought a meal overseas and was overcharged by the restaurant.
+32 fx [ 4.07  1.36  0.26 -1.98 -0.1 ] option [-6.43 -2.02 -0.35  3.02  0.2 ] How do I order a replacement card?
+33 fx [ 3.14  3.56 -0.01 -2.32  0.64] option [-5.12 -5.61 -0.02  3.44 -1.  ] I lost my debit card.
+34 fx [ 1.71  3.59 -0.2  -1.85  1.24] option [-2.79 -5.61  0.31  2.77 -1.91] My contactless payment feature does not work.
+35 fx [ 3.39  2.85  0.64 -2.05  4.99] option [-5.4  -4.34 -0.94  3.11 -7.84] I forgot my card PIN.
+36 fx [ 6.03 -0.85 -0.81 -2.84  1.14] option [-9.65  1.35  1.3   4.32 -1.69] How do I activate my new card?
+37 fx [ 3.72 -0.05  1.13 -2.26  0.62] option [-5.85  0.12 -1.69  3.43 -0.9 ] How can I add my card to Apple Pay?
+38 fx [ 1.    0.63  5.9  -3.99 -2.2 ] option [-1.64 -0.99 -9.59  5.89  3.29] Where is my bank transfer?
+39 fx [ 1.77  0.09  5.34 -2.93 -0.47] option [-2.85 -0.13 -8.64  4.39  0.73] How do I top up my account?
+40 fx [-0.64 -0.38  0.65 -4.74 -3.32] option [ 0.71  0.41 -1.18  6.94  4.84] My balance has not updated after my deposit.
+41 fx [ 0.45  1.8  -1.56 -3.46  5.98] option [ -0.76  -2.74   2.32   5.15 -10.05] I cannot verify my identity.
+42 fx [ 1.9   2.92  1.12 -1.82  5.25] option [-3.07 -4.52 -1.71  2.74 -8.38] I forgot my app passcode.
+43 fx [ 0.65  2.05  0.08 -2.07  3.12] option [-1.09 -3.16 -0.14  3.1  -4.81] Please close my account.
+44 fx [ 2.46  3.66  1.63 -0.99  1.92] option [-3.98 -5.68 -2.52  1.53 -2.99] I lost my phone.
+45 fx [ 2.09  1.6   1.01 -1.15  1.36] option [-3.36 -2.47 -1.59  1.75 -2.14] Can I open an account in my country?
+46 fx [ 2.17  2.43  1.65 -1.22  2.16] option [-3.48 -3.72 -2.57  1.84 -3.34] I want to change my address.
+47 fx [ 0.56 -0.87 -0.53 -3.14 -2.89] option [-1.13  1.22  0.71  4.64  4.27] What currencies can I hold?
+48 fx [ 1.03 -0.07  0.3   0.74 -2.63] option [-1.69  0.08 -0.48 -1.15  3.94] How do I exchange euros into pounds?
+49 fx [ 1.44  1.25  0.76  0.72 -1.14] option [-2.24 -1.89 -1.13 -1.07  1.73] What is your exchange rate today?
+50 fx [-4.57  0.52 -4.72  4.74 -4.86] option [ 6.68 -0.9   6.92 -8.39  7.13] Why was I charged a cash withdrawal fee?
+51 fx [ 1.2  -0.37  0.08  4.75 -2.3 ] option [-1.93  0.57 -0.1  -8.44  3.46] What is the fee for an international transfer?
+52 fx [ 0.67  1.14 -1.9  -3.53  0.55] option [-1.21 -1.84  2.8   5.22 -0.93] My card was stolen.
+53 fx [ 1.63  4.45  0.15 -1.64  0.43] option [-2.7  -7.08 -0.25  2.44 -0.68] I did not make this card purchase abroad.
+54 fx [ 0.44  4.47  0.97 -1.32  0.75] option [-0.76 -7.06 -1.49  1.97 -1.17] A cash withdrawal I never made appeared on my account.
+55 fx [ 0.16  3.88 -1.75 -3.14 -3.04] option [-0.37 -6.05  2.59  4.64  4.49] The merchant promised a refund but it has not arrived.
+56 fx [ 0.01  4.9  -1.05 -1.22 -0.66] option [-0.15 -7.9   1.52  1.79  0.94] My direct debit was taken twice.
+57 fx [ 3.02  4.06 -0.53 -2.27 -0.17] option [-4.93 -6.36  0.81  3.41  0.28] I want to cancel a pending card payment.
+58 fx [ 1.56  3.29 -0.21 -1.47  0.77] option [-2.65 -5.23  0.24  2.14 -1.24] The ATM kept my card.
+59 fx [ 1.48  4.33 -0.8  -0.71 -0.39] option [-2.46 -6.81  1.19  1.09  0.58] The card payment went through in the wrong currency.
+60 fx [-2.17 -2.75 -3.05 -2.2  -4.46] option [2.98 3.97 4.41 3.16 6.5 ] How can I choose which currency to pay in?
+61 fx [ 1.9   0.27 -0.39 -1.62 -3.2 ] option [-3.05 -0.44  0.57  2.46  4.8 ] Does my card support Japanese yen?
+62 fx [1.29 0.41 1.6  0.77 1.39] option [-2.06 -0.61 -2.49 -1.14 -2.14] How much cash may I withdraw overseas?
+63 fx [ 2.72  1.9   1.14 -0.69  2.33] option [-4.36 -2.9  -1.72  1.1  -3.56] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 fx [ 0.57  4.94 -0.66  1.19 -1.49] option [-0.97 -7.81  0.98 -1.86  2.24] I was charged the wing amount for an item.
+1 fx [ 0.58  3.48  1.21  0.42 -0.3 ] option [-0.99 -5.45 -1.92 -0.64  0.46] When I made a cash transfer abroad the wrong exchange rate was applied
+2 fx [ 1.9   5.01 -1.69  0.09 -1.  ] option [-3.1  -7.97  2.55 -0.11  1.52] My card payment had the wrong exchange rate
+3 fx [-1.23  0.34 -2.7   0.22 -3.02] option [ 1.77 -0.56  4.   -0.33  4.49] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 fx [-0.25  4.98 -0.81 -0.59 -1.97] option [ 0.27 -8.04  1.19  0.88  2.93] I withdrew cash and I think the exchange rate is wrong.
+5 fx [ 0.37  4.3   0.32  1.25 -1.91] option [-0.64 -6.73 -0.49 -1.9   2.88] When I got cash the exchange rate was wrong
+6 fx [ 0.29  2.84 -1.16  0.69 -2.1 ] option [-0.55 -4.41  1.7  -1.07  3.11] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 fx [-0.79  0.25 -3.97 -1.39 -3.81] option [ 0.96 -0.54  5.78  2.    5.56] Why is the exchange rate on my card wrong?
+8 fx [ 0.68  4.35 -0.47  1.02 -0.47] option [-1.17 -6.9   0.67 -1.6   0.68] I purchased something overseas and the incorrect exchange rate was applied.
+9 fx [-0.97  2.73 -2.66 -1.1  -3.07] option [ 1.27 -4.33  3.88  1.57  4.49] The exchange rate was incorrect for this item I bought.
+10 fx [1.47 3.96 0.93 1.51 0.89] option [-2.41 -6.21 -1.45 -2.29 -1.37] The exchange rate for case abroad is applied wrong.
+11 fx [ 0.51  0.3   0.36 -0.68 -1.74] option [-0.88 -0.49 -0.59  1.01  2.6 ] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 fx [-4.61 -1.11 -4.56 -4.84 -5.49] option [6.61 1.3  6.57 6.99 7.93] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 fx [-1.56  2.62 -2.63 -0.19 -2.36] option [ 2.19 -4.13  3.85  0.21  3.47] Why was the wrong rate applied when I bought something in a different currency?
+14 fx [-0.2   2.15 -1.05 -0.34 -2.08] option [ 0.17 -3.34  1.52  0.48  3.08] There's an error in regards to the exchange rate for an item I bought.
+15 fx [ 0.85  1.24  1.11  1.15 -1.18] option [-1.39 -1.93 -1.74 -1.78  1.73] what is the correct exchange rate for getting cash
+16 fx [ 3.52  5.15 -1.85 -3.21 -2.46] option [-5.85 -8.2   2.72  4.74  3.63] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 fx [-1.67  5.02 -0.51 -2.53 -1.4 ] option [ 2.39 -8.02  0.68  3.73  2.03] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 fx [ 2.26  3.81  1.41 -1.5   0.59] option [-3.68 -5.93 -2.2   2.26 -0.91] What should I do about a direct debit that I did not set up?
+19 fx [ 1.42  0.16 -1.12  6.37 -1.82] option [ -2.25  -0.23   1.71 -10.49   2.79] is there a foreign currencies charge?
+20 fx [-5.7  -0.91 -5.87 -6.37 -5.47] option [8.2  1.03 8.47 9.19 7.89] Why did I not get my refund yet?
+21 fx [ 0.6   3.09 -3.77  5.12 -3.23] option [-1.01 -4.73  5.61 -8.91  4.82] I was mistakenly charged a fee for using my card.
+22 fx [-2.14 -0.03 -4.39  3.21 -4.16] option [ 3.06 -0.04  6.48 -6.3   6.16] The ATM charged me an extra fee, Why?
+23 fx [-3.12  0.84 -4.43  2.73 -4.62] option [ 4.54 -1.37  6.5  -5.62  6.8 ] My transaction went through but I was charged a fee. Why?
+24 fx [ 1.78 -0.25  4.02  4.03 -1.7 ] option [-2.8   0.44 -6.21 -7.48  2.64] Will I get charged fees when I add money with an international card?
+25 fx [ 0.82  2.23  0.88 -2.97 -1.93] option [-1.28 -3.37 -1.3   4.48  2.95] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 fx [ 1.39  3.51  0.44 -1.27  0.46] option [-2.14 -5.41 -0.63  1.94 -0.65] I don't think I made this transaction on my statement
+27 fx [-0.91  3.64 -2.55  1.26 -2.55] option [ 1.21 -5.8   3.73 -2.04  3.73] There is a strange charge on my debit statement
+28 fx [-1.7  -1.03 -4.3   3.36 -4.21] option [ 2.45  1.52  6.36 -6.46  6.24] Why do i have an extra fee on my statement?
+29 fx [ 1.51  5.07 -3.23 -3.8  -2.47] option [-2.57 -8.2   4.75  5.6   3.64] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fx [ 0.28 -0.03 -0.07  3.64 -3.32] option [-0.51  0.04  0.11 -6.9   4.95] What is this extra fee while I was doing a transfer?
+31 fx [-1.17  4.18 -0.98 -2.42 -1.23] option [ 1.63 -6.65  1.41  3.58  1.79] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('probes_M.npz')['M']; a=M.reshape(-1,1024)
+for i in np.argsort(a.std(0))[-20:][::-1]: print(i, 'mean/std', a[:,i].mean(),a[:,i].std(), 'min/max',a[:,i].min(),a[:,i].max())
+print('norm median dimension',np.median(np.linalg.norm(a,axis=0)), 'max',np.max(abs(a)), 'quantiles',np.quantile(abs(a),[.5,.9,.99,.999]))
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 0ms:
+515 mean/std 781.1405 181.88992 min/max 364.19037 1206.668
+471 mean/std -885.2119 181.24062 min/max -1241.3187 -441.6353
+91 mean/std -934.04016 177.09924 min/max -1266.8281 -490.13965
+553 mean/std 849.3288 172.43178 min/max 426.3137 1182.3801
+76 mean/std -494.42902 168.1771 min/max -916.9374 -146.9583
+614 mean/std -477.3287 167.71072 min/max -940.08484 -154.04494
+35 mean/std 775.51544 163.264 min/max 393.17035 1118.4524
+1014 mean/std 567.5709 162.89093 min/max 221.23518 948.40576
+490 mean/std -450.49194 156.33566 min/max -775.67725 -105.45401
+440 mean/std 936.09717 154.83775 min/max 563.57605 1267.3286
+1001 mean/std -34.00862 154.37044 min/max -543.7048 198.93259
+211 mean/std -444.53278 149.1391 min/max -845.84894 -156.67639
+352 mean/std 374.24115 147.05336 min/max 71.50815 700.0194
+979 mean/std -671.64484 146.31718 min/max -964.552 -327.74078
+11 mean/std -84.36756 143.761 min/max -648.28094 119.47629
+502 mean/std -384.2166 143.18633 min/max -788.819 -114.470695
+726 mean/std -863.96857 142.96767 min/max -1132.8011 -498.78107
+642 mean/std -517.47546 141.61089 min/max -790.6247 -185.6984
+853 mean/std -329.30746 140.3311 min/max -664.0044 -37.469223
+833 mean/std -167.95627 140.25163 min/max -373.61917 310.00626
+norm median dimension 3521.0698 max 1267.3286 quantiles [ 187.32808685  467.1750946   823.5546991  1103.50255127]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_clean.py <<'PY'
+exec(open('inspect_probes.py').read().split('# Each direction')[0])
+u=P.mean((0,1)); u=u/np.linalg.norm(u)
+# A nuisance direction for general option relevance from unambiguous controls.
+labels=[0,0,0,0,0,0,2,2,2,4,4,4,4,4,4,3,3,3,3,3,0,1,1,1,1,1,0,1,3,0,0,0]
+Q=P[32:]; good=Q[np.arange(len(Q)),labels].mean(0); bad=np.array([np.delete(q,l,axis=0).mean(0) for q,l in zip(Q,labels)]).mean(0)
+r=good-bad; r=r-u*(r@u); r=r/np.linalg.norm(r)
+def clean(x):
+ return x-(x@u)[...,None]*u-(x@r)[...,None]*r
+C=clean(P)
+p=C[:16,3].mean(0); n=C[16:32,3].mean(0); d=p-n
+w=2*d/(d@d); b=-((p+n)/2)@w
+p2=C[:,3].mean(0); n2=C[:,[0,1,2,4]].mean((0,1)); d2=p2-n2
+v=2*d2/(d2@d2); c=-((p2+n2)/2)@v
+np.savez('directions.npz',w=w,b=b,v=v,c=c)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=M@w+b; y=M@v+c
+ for i,t in enumerate(ts): print(i,'fx',np.round(x[i],2),'option',np.round(y[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_clean.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 671ms:
+
+ probes
+0 fx [2.16 3.21 1.35 3.1  0.09] option [-3.48 -4.26 -1.8  -3.81 -0.19] The exchange rate used for my card purchase was wrong.
+1 fx [ 1.2   3.42  0.65  0.78 -0.49] option [-1.85 -4.29 -0.95 -0.94  0.48] The currency conversion on my cash withdrawal is incorrect.
+2 fx [ 0.87  3.68  0.46  3.8  -0.86] option [-1.43 -4.53 -0.6  -4.52  0.92] I paid abroad and the exchange rate was terrible.
+3 fx [ 2.21  2.74 -0.21  2.16  1.86] option [-3.17 -3.61  0.2  -2.68 -2.33] My ATM withdrawal used a bad conversion rate.
+4 fx [ 1.03  1.35 -1.31  1.68 -2.5 ] option [-1.67 -1.88  1.32 -2.15  2.75] The amount charged for my purchase is wrong because of the exchange rate.
+5 fx [ 0.79  2.71 -3.29 -3.71 -2.59] option [-2.23 -4.16  3.26  3.8   2.42] Why did you convert my card transaction at such an unfair rate?
+6 fx [ 0.26  2.94 -1.    0.94 -0.9 ] option [-0.83 -3.99  0.86 -1.44  0.76] I received less cash than expected due to an incorrect exchange rate.
+7 fx [2.05 3.37 1.01 2.74 0.06] option [-2.81 -4.09 -1.33 -3.27 -0.24] The rate applied to my overseas shopping does not match the market rate.
+8 fx [ 1.66  2.71 -1.22  2.28 -2.35] option [-2.52 -3.49  1.18 -2.9   2.57] The foreign currency rate on this payment is not right.
+9 fx [ 0.11  3.45 -0.81 -0.32 -2.75] option [-0.87 -4.36  0.42 -0.09  2.8 ] I think the exchange rate for the money I took out is mistaken.
+10 fx [ 1.12  3.1   0.66  2.79 -0.94] option [-1.84 -4.14 -1.01 -3.52  0.93] My purchase was converted from euros to pounds at the wrong rate.
+11 fx [-0.14 -2.48 -0.02 -1.93 -0.78] option [-0.34  2.58 -0.22  2.11  0.7 ] You applied the wrong conversion rate when I withdrew dollars.
+12 fx [ 1.53  3.28  2.41  1.55 -0.1 ] option [-2.34 -4.34 -3.31 -2.1  -0.13] The exchange rate on my bank transfer abroad was incorrect.
+13 fx [-2.28 -0.18 -3.66 -0.83 -3.83] option [ 1.92 -0.45  3.65  0.39  3.92] Why is your exchange rate worse than the interbank rate?
+14 fx [ 1.39  3.18  0.85  2.5  -1.11] option [-2.15 -4.31 -1.35 -3.3   1.07] The currency conversion rate looks wrong on this transaction.
+15 fx [ 1.56  2.7  -0.7  -1.53 -1.11] option [-2.51 -3.57  0.52  1.26  1.04] I bought a meal overseas and was overcharged due to the conversion rate.
+16 fx [ 0.62 -6.37 -2.37  1.89 -1.99] option [-1.42  8.28  2.56 -2.6   2.1 ] The amount charged for my card purchase was wrong.
+17 fx [-0.25 -1.25 -0.32 -3.02 -0.51] option [-0.32  0.79 -0.01  3.28  0.22] The cash machine gave me the wrong amount of money.
+18 fx [ 0.77 -0.59 -0.68 -1.04 -0.4 ] option [-1.58 -0.08  0.49  0.97  0.16] I paid abroad and the payment was declined.
+19 fx [ 1.53  3.2  -0.04 -1.19  0.72] option [-2.5  -4.33 -0.36  1.09 -1.33] My ATM withdrawal is pending.
+20 fx [ -4.83 -13.43  -5.44   0.26  -4.99] option [ 5.09 16.66  5.9  -1.03  5.36] The amount charged for my purchase is wrong because I was charged twice.
+21 fx [ 2.33  1.97 -1.48 -3.12 -0.42] option [-3.85 -2.92  1.35  3.36  0.06] Why did you decline my card transaction?
+22 fx [-0.58  0.56 -1.04 -2.64 -0.97] option [ 0.09 -1.4   0.81  2.79  0.7 ] I received less cash than requested but the full amount was debited.
+23 fx [-1.53  2.82 -3.85 -0.54 -3.53] option [ 1.1  -3.9   4.08  0.13  3.71] The charge for my overseas shopping does not match my receipt.
+24 fx [2.78 3.55 1.08 2.5  2.07] option [-3.82 -4.22 -1.33 -2.75 -2.4 ] The foreign currency payment is not recognised.
+25 fx [-1.46 -3.19 -1.53 -2.21 -1.65] option [1.28 4.05 1.45 2.31 1.61] I think the money I took out was deducted twice.
+26 fx [-2.56  2.79 -2.49 -2.14 -3.6 ] option [ 2.32 -4.08  2.45  2.07  3.77] My purchase in euros was reversed but I have no refund.
+27 fx [ 0.31  2.   -1.27 -2.12 -0.57] option [-1.25 -3.22  0.92  1.97  0.05] You debited my account but the ATM did not dispense dollars.
+28 fx [ 1.87  1.1   2.99 -1.05  1.77] option [-2.84 -1.71 -3.86  1.1  -2.51] The bank transfer abroad went to the incorrect account.
+29 fx [ 1.39  1.69 -2.79 -3.06 -1.03] option [-2.75 -2.3   3.01  3.36  0.84] Why is my card payment still pending?
+30 fx [ 1.67 -0.87  2.26 -1.19  0.36] option [-2.41  0.57 -3.    1.31 -0.58] The recipient account looks wrong on this transaction.
+31 fx [1.86 2.92 0.58 2.67 0.12] option [-3.16 -4.14 -1.11 -3.81 -0.56] I bought a meal overseas and was overcharged by the restaurant.
+32 fx [ 2.78  2.21  1.08 -1.51  0.69] option [-3.81 -2.69 -1.37  1.73 -0.86] How do I order a replacement card?
+33 fx [ 2.42  3.07  0.82 -1.83  1.47] option [-3.94 -4.24 -1.34  1.87 -2.11] I lost my debit card.
+34 fx [ 2.6   3.48  0.83 -1.11  2.19] option [-3.73 -4.39 -1.04  1.2  -2.82] My contactless payment feature does not work.
+35 fx [ 3.06  3.71  1.77 -1.35  2.43] option [-3.99 -4.26 -2.01  1.68 -2.91] I forgot my card PIN.
+36 fx [-1.06 -0.02 -0.01 -2.43  2.04] option [ 1.45  0.1   0.09  3.   -2.51] How do I activate my new card?
+37 fx [ 3.    0.96  2.19 -1.68  1.62] option [-3.83 -1.12 -2.63  1.99 -1.94] How can I add my card to Apple Pay?
+38 fx [ 1.92  1.66 -2.7  -3.78 -1.57] option [-2.81 -2.26  3.45  4.22  1.68] Where is my bank transfer?
+39 fx [ 2.47  1.12 -0.58 -2.49  0.41] option [-3.49 -1.36  0.26  2.9  -0.56] How do I top up my account?
+40 fx [-0.37 -0.07  0.92 -5.06 -3.31] option [-0.91 -0.97 -2.26  5.28  3.11] My balance has not updated after my deposit.
+41 fx [ 1.29  2.6  -0.92 -3.28 -9.55] option [-1.92 -3.2   0.77  3.59 12.3 ] I cannot verify my identity.
+42 fx [ 2.56  3.36  2.13 -1.13  0.79] option [-3.66 -4.23 -2.66  1.25 -1.31] I forgot my app passcode.
+43 fx [ 1.21  2.59  0.67 -1.75  3.2 ] option [-2.05 -3.43 -1.24  1.74 -4.16] Please close my account.
+44 fx [ 2.93  3.58  2.59 -0.1   2.76] option [-4.18 -4.38 -3.32  0.21 -3.6 ] I lost my phone.
+45 fx [ 2.55  2.36  1.82 -0.45  2.06] option [-3.7  -3.11 -2.57  0.41 -2.91] Can I open an account in my country?
+46 fx [ 2.84  3.28  2.52 -0.41  2.98] option [-3.93 -3.91 -3.31  0.43 -3.73] I want to change my address.
+47 fx [ 1.07 -0.27  0.05 -2.96 -2.67] option [-2.54 -0.33 -0.73  3.05  2.66] What currencies can I hold?
+48 fx [ 1.85  0.83  1.18  1.62 -2.15] option [-2.73 -1.28 -1.73 -2.27  2.37] How do I exchange euros into pounds?
+49 fx [ 2.56  2.42  1.88  1.79 -0.36] option [-3.13 -2.82 -2.2  -2.13  0.32] What is your exchange rate today?
+50 fx [ -4.69   1.14  -4.9  -12.56  -5.11] option [ 4.87 -2.14  5.21 15.75  5.47] Why was I charged a cash withdrawal fee?
+51 fx [  1.8    0.32   0.77 -13.13  -2.02] option [-2.75 -0.66 -1.2  16.55  2.05] What is the fee for an international transfer?
+52 fx [ 1.18  1.73 -1.45 -3.43  1.13] option [-2.33 -2.76  1.26  3.68 -2.04] My card was stolen.
+53 fx [ 2.42  2.09  1.07 -0.99  1.33] option [-3.7  -2.99 -1.51  0.92 -1.84] I did not make this card purchase abroad.
+54 fx [ 1.27  2.68  1.9  -0.66  1.59] option [-2.06 -3.58 -2.55  0.5  -2.25] A cash withdrawal I never made appeared on my account.
+55 fx [ 0.71  3.2  -1.41 -3.06 -2.95] option [-1.53 -4.29  1.2   3.17  3.02] The merchant promised a refund but it has not arrived.
+56 fx [ 0.77  0.96 -0.34 -0.56  0.06] option [-1.64 -1.73 -0.02  0.28 -0.51] My direct debit was taken twice.
+57 fx [ 2.61  3.39  0.48 -1.63  0.87] option [-3.99 -4.26 -0.55  1.91 -0.99] I want to cancel a pending card payment.
+58 fx [ 2.23  3.07  0.61 -0.84  1.64] option [-3.73 -4.35 -1.2   0.54 -2.42] The ATM kept my card.
+59 fx [ 2.1   2.95 -0.02  0.06  0.41] option [-3.38 -3.83 -0.22 -0.22 -0.71] The card payment went through in the wrong currency.
+60 fx [-1.92 -2.55 -2.93 -1.95 -4.65] option [0.98 2.15 2.6  1.45 4.76] How can I choose which currency to pay in?
+61 fx [ 2.24  0.82  0.09 -1.32 -3.23] option [-3.57 -1.49 -0.6   1.2   3.45] Does my card support Japanese yen?
+62 fx [2.3  1.44 2.53 1.77 2.31] option [-3.15 -1.81 -3.4  -2.18 -3.04] How much cash may I withdraw overseas?
+63 fx [3.17 2.93 2.22 0.2  3.24] option [-4.34 -3.53 -2.66 -0.11 -3.93] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 fx [ 1.32  1.88  0.08  1.91 -0.9 ] option [-2.17 -2.71 -0.4  -2.75  0.81] I was charged the wing amount for an item.
+1 fx [1.36 3.21 1.99 1.23 0.45] option [-2.24 -4.37 -2.97 -1.8  -0.82] When I made a cash transfer abroad the wrong exchange rate was applied
+2 fx [ 2.38  1.51 -1.05  0.94 -0.27] option [-3.74 -2.26  1.08 -1.29  0.17] My card payment had the wrong exchange rate
+3 fx [-0.25  1.52 -2.12  1.32 -2.52] option [-0.02 -1.99  2.28 -1.68  2.82] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 fx [ 0.59  0.25 -0.03  0.2  -1.38] option [-1.29 -0.96 -0.32 -0.52  1.34] I withdrew cash and I think the exchange rate is wrong.
+5 fx [ 1.27  3.12  1.25  2.16 -1.27] option [-1.94 -3.92 -1.68 -2.75  1.37] When I got cash the exchange rate was wrong
+6 fx [ 1.26  3.33 -0.33  1.67 -1.46] option [-1.93 -4.23  0.12 -2.2   1.47] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 fx [ 0.05  1.14 -3.66 -0.68 -3.5 ] option [-0.99 -2.07  3.82  0.33  3.65] Why is the exchange rate on my card wrong?
+8 fx [1.48 2.35 0.31 1.83 0.28] option [-2.44 -3.39 -0.75 -2.59 -0.67] I purchased something overseas and the incorrect exchange rate was applied.
+9 fx [-0.12  3.01 -2.08 -0.31 -2.59] option [-0.66 -4.2   1.94 -0.14  2.6 ] The exchange rate was incorrect for this item I bought.
+10 fx [2.07 2.99 1.74 2.26 1.68] option [-3.26 -3.99 -2.47 -2.99 -2.34] The exchange rate for case abroad is applied wrong.
+11 fx [ 1.08  0.95  0.96 -0.19 -1.4 ] option [-1.96 -1.6  -1.65 -0.23  1.21] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 fx [-4.31 -0.38 -4.3  -4.66 -5.46] option [ 4.27 -1.06  4.3   4.79  5.77] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 fx [-0.83  3.04 -2.13  0.6  -1.84] option [ 0.27 -4.21  2.04 -1.22  1.73] Why was the wrong rate applied when I bought something in a different currency?
+14 fx [ 0.73  2.9  -0.21  0.54 -1.44] option [-1.47 -3.74 -0.1  -0.95  1.41] There's an error in regards to the exchange rate for an item I bought.
+15 fx [ 1.66  2.05  1.91  1.92 -0.46] option [-2.46 -2.81 -2.65 -2.66  0.19] what is the correct exchange rate for getting cash
+16 fx [ 1.37  1.41 -1.15 -2.82 -1.9 ] option [-2.81 -1.93  1.04  3.06  1.93] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 fx [-0.99  1.34  0.25 -2.02 -0.75] option [ 0.59 -2.02 -0.87  2.03  0.4 ] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 fx [ 2.71  3.5   2.34 -0.7   1.54] option [-3.97 -4.2  -3.09  0.76 -2.03] What should I do about a direct debit that I did not set up?
+19 fx [ 2.13  1.02 -0.43 -7.04 -1.29] option [-2.96 -1.43  0.35  9.14  1.43] is there a foreign currencies charge?
+20 fx [-5.69 -0.28 -5.95 -6.57 -5.47] option [ 5.89 -1.14  6.29  7.08  5.7 ] Why did I not get my refund yet?
+21 fx [  1.27   3.36  -3.78 -11.64  -3.15] option [-2.08 -4.33  4.23 14.71  3.48] I was mistakenly charged a fee for using my card.
+22 fx [ -1.71   0.54  -4.47 -14.87  -4.22] option [ 1.18 -1.36  4.8  18.51  4.52] The ATM charged me an extra fee, Why?
+23 fx [ -2.94   1.41  -4.56 -15.39  -4.86] option [ 2.71 -2.44  4.79 19.16  5.17] My transaction went through but I was charged a fee. Why?
+24 fx [  2.17   0.38   3.43 -14.96  -1.35] option [-3.24 -0.57 -4.43 18.85  1.56] Will I get charged fees when I add money with an international card?
+25 fx [ 1.94  3.19  2.07 -2.55 -1.27] option [-2.44 -3.74 -2.37  3.05  1.54] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 fx [ 2.51  3.8   1.53 -0.48  1.53] option [-3.09 -4.52 -1.81  0.55 -1.78] I don't think I made this transaction on my statement
+27 fx [-0.19  2.91 -2.04  1.97 -2.07] option [-0.56 -4.21  1.94 -2.99  1.97] There is a strange charge on my debit statement
+28 fx [ -1.19  -0.44  -4.43 -13.66  -4.35] option [ 0.75  0.04  4.84 16.86  4.77] Why do i have an extra fee on my statement?
+29 fx [ 2.12  0.18 -2.79 -3.52 -1.93] option [-3.63 -0.84  2.91  3.8   1.87] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fx [  0.87   0.6    0.52 -14.6   -3.32] option [-1.63 -1.09 -1.01 18.37  3.56] What is this extra fee while I was doing a transfer?
+31 fx [-0.6   2.75 -0.43 -2.11 -0.73] option [-0.04 -4.03 -0.06  2.04  0.3 ] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The marker vectors contain a strong signal for general option relevance. I am separating that signal from the exchange-rate correction so the added module has less effect on other messages. The checks include declined payments, refunds, missing cash, transfers, and account access.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_projected.py <<'PY'
+exec(open('inspect_probes.py').read().split('# Each direction')[0])
+# Remove background and non-target option contrast directions. These all
+# come from authored messages, never from the supplied evidence.
+basis=[]
+def add(v):
+ v=v.astype(np.float64).copy()
+ for u in basis: v-=u*(v@u)
+ if np.linalg.norm(v)>1e-6: basis.append(v/np.linalg.norm(v))
+for j in [0,1,2,4]:
+ add(P[:,j].mean(0))
+ add(P[:16,j].mean(0)-P[16:32,j].mean(0))
+add(P[16:,3].mean(0))
+# Generic high-confidence matching-option signal.
+add(P[50:52,3].mean(0)-P[32:47,3].mean(0))
+d=P[:16,3].mean(0)-P[16:32,3].mean(0)
+for u in basis: d-=u*(d@u)
+p=P[:16,3].mean(0)@d; n=P[16:32,3].mean(0)@d
+w=d/(p-n); b=-n/(p-n)
+np.savez('directions.npz',w=w,b=b)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=M@w+b
+ for i,t in enumerate(ts): print(i,np.round(x[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_projected.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 668ms:
+
+ probes
+0 [-0.37 -1.02 -0.2   1.05 -0.32] The exchange rate used for my card purchase was wrong.
+1 [-0.36  0.11 -0.44  0.29 -0.71] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.38  0.5  -0.44  2.05 -0.52] I paid abroad and the exchange rate was terrible.
+3 [-0.02 -0.2  -0.69  0.49 -0.06] My ATM withdrawal used a bad conversion rate.
+4 [-0.52  0.3  -0.84  1.26 -0.76] The amount charged for my purchase is wrong because of the exchange rate.
+5 [0.92 0.64 0.39 0.62 0.32] Why did you convert my card transaction at such an unfair rate?
+6 [-0.74 -0.54 -0.71  0.06 -0.65] I received less cash than expected due to an incorrect exchange rate.
+7 [0.1  0.45 0.13 1.28 0.06] The rate applied to my overseas shopping does not match the market rate.
+8 [1.23 1.36 0.42 2.57 0.63] The foreign currency rate on this payment is not right.
+9 [0.52 0.69 0.49 1.16 0.74] I think the exchange rate for the money I took out is mistaken.
+10 [-0.43 -0.52 -0.31  1.39 -0.51] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.63  0.21 -0.46 -0.49 -0.59] You applied the wrong conversion rate when I withdrew dollars.
+12 [-0.09 -0.46  0.66  0.8  -0.33] The exchange rate on my bank transfer abroad was incorrect.
+13 [0.22 0.06 0.42 0.83 0.63] Why is your exchange rate worse than the interbank rate?
+14 [ 0.15 -0.29  0.07  1.78 -0.11] The currency conversion rate looks wrong on this transaction.
+15 [-0.2   0.13 -0.71  0.87 -0.66] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [-0.05  0.21 -0.48  1.19 -0.49] The amount charged for my card purchase was wrong.
+17 [-1.01 -0.53 -0.96 -1.05 -1.02] The cash machine gave me the wrong amount of money.
+18 [-0.41 -0.33 -0.79 -0.73 -0.74] I paid abroad and the payment was declined.
+19 [0.81 0.26 0.16 0.18 0.45] My ATM withdrawal is pending.
+20 [ 0.87 -1.34  0.8   0.98  0.75] The amount charged for my purchase is wrong because I was charged twice.
+21 [-0.91  0.34 -0.83 -0.7  -0.77] Why did you decline my card transaction?
+22 [-0.55  0.15 -0.49 -0.53 -0.54] I received less cash than requested but the full amount was debited.
+23 [-0.28  0.51 -0.3   0.58 -0.27] The charge for my overseas shopping does not match my receipt.
+24 [ 0.39  0.26 -0.09  0.99  0.26] The foreign currency payment is not recognised.
+25 [-0.24  0.5  -0.34 -0.35 -0.32] I think the money I took out was deducted twice.
+26 [1.   1.36 0.86 0.94 0.99] My purchase in euros was reversed but I have no refund.
+27 [ 0.12 -0.   -0.08 -0.14 -0.05] You debited my account but the ATM did not dispense dollars.
+28 [-0.03 -0.02  0.79 -0.28  0.33] The bank transfer abroad went to the incorrect account.
+29 [-0.47  1.06 -0.91 -0.79 -0.88] Why is my card payment still pending?
+30 [-0.08 -0.37  0.46 -0.38 -0.38] The recipient account looks wrong on this transaction.
+31 [ 0.21 -0.63 -0.01  0.07 -0.18] I bought a meal overseas and was overcharged by the restaurant.
+32 [0.27 0.66 0.56 0.24 0.33] How do I order a replacement card?
+33 [-0.49 -0.35  0.35 -0.01  0.48] I lost my debit card.
+34 [ 0.13 -0.12 -0.17 -0.49  0.53] My contactless payment feature does not work.
+35 [-0.67  0.26 -0.48 -1.09  0.49] I forgot my card PIN.
+36 [ 0.47 -0.5  -0.33 -0.5   0.68] How do I activate my new card?
+37 [-0.46 -0.37  0.4  -0.11  0.19] How can I add my card to Apple Pay?
+38 [ 0.13 -0.28  0.81 -0.42 -0.55] Where is my bank transfer?
+39 [-0.02 -0.55  0.6  -0.29 -0.18] How do I top up my account?
+40 [1.69 1.73 2.53 2.18 1.62] My balance has not updated after my deposit.
+41 [ 0.15  0.94 -0.7  -0.54  0.4 ] I cannot verify my identity.
+42 [-0.38 -0.22  0.01 -0.58  0.42] I forgot my app passcode.
+43 [1.14 1.17 1.07 0.76 1.12] Please close my account.
+44 [ 0.33 -0.21  0.83 -0.2   0.84] I lost my phone.
+45 [0.38 0.61 0.8  0.38 0.97] Can I open an account in my country?
+46 [ 0.23  0.18  0.67 -0.17  0.61] I want to change my address.
+47 [2.1  1.54 2.1  2.18 1.91] What currencies can I hold?
+48 [ 0.12 -0.56 -0.02  0.89 -0.53] How do I exchange euros into pounds?
+49 [ 0.23 -0.06  0.19  0.78 -0.16] What is your exchange rate today?
+50 [0.28 0.99 0.11 0.32 0.28] Why was I charged a cash withdrawal fee?
+51 [ 1.48  0.08  0.82 -0.43  0.26] What is the fee for an international transfer?
+52 [0.88 0.9  0.16 0.38 0.98] My card was stolen.
+53 [ 0.21 -0.67  0.23  0.09  0.32] I did not make this card purchase abroad.
+54 [ 0.47 -0.04  0.89  0.33  0.67] A cash withdrawal I never made appeared on my account.
+55 [1.59 1.44 1.36 1.37 1.39] The merchant promised a refund but it has not arrived.
+56 [ 0.19  0.35 -0.12 -0.15 -0.13] My direct debit was taken twice.
+57 [-0.95 -0.04 -0.55 -0.88 -0.51] I want to cancel a pending card payment.
+58 [0.86 0.19 0.78 0.44 0.99] The ATM kept my card.
+59 [-0.1  -0.19 -0.3   0.12 -0.16] The card payment went through in the wrong currency.
+60 [2.01 1.86 2.24 2.57 2.61] How can I choose which currency to pay in?
+61 [2.33 1.68 1.81 1.97 1.76] Does my card support Japanese yen?
+62 [0.27 0.07 1.06 1.1  0.91] How much cash may I withdraw overseas?
+63 [0.06 0.41 0.46 0.04 0.88] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [ 0.64  0.18  0.13  1.13 -0.06] I was charged the wing amount for an item.
+1 [ 0.27 -0.13  0.82  0.99  0.19] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [ 0.16  0.11 -0.4   0.51 -0.23] My card payment had the wrong exchange rate
+3 [-0.73 -0.77 -0.86  0.45 -0.71] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [-0.37 -0.32 -0.39  0.25 -0.53] I withdrew cash and I think the exchange rate is wrong.
+5 [-0.1  -0.24  0.19  1.26 -0.37] When I got cash the exchange rate was wrong
+6 [-0.36  0.24 -0.51  0.69 -0.48] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [-0.24 -0.23 -0.21  0.51 -0.07] Why is the exchange rate on my card wrong?
+8 [-0.13 -0.42 -0.18  1.   -0.04] I purchased something overseas and the incorrect exchange rate was applied.
+9 [-0.7  -0.09 -0.82 -0.17 -0.62] The exchange rate was incorrect for this item I bought.
+10 [ 0.21 -0.63  0.26  1.16  0.36] The exchange rate for case abroad is applied wrong.
+11 [1.4  1.19 1.56 1.78 0.78] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [1.83 0.57 1.77 2.29 2.42] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [-0.7   0.32 -0.68  0.38 -0.51] Why was the wrong rate applied when I bought something in a different currency?
+14 [-0.39 -0.03 -0.58  0.13 -0.51] There's an error in regards to the exchange rate for an item I bought.
+15 [ 0.65  0.7   1.13  1.72 -0.13] what is the correct exchange rate for getting cash
+16 [-0.62  0.88 -0.69 -0.68 -0.82] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [-0.64  0.4  -0.27 -0.79 -0.76] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-0.59 -0.74  0.32 -0.56 -0.2 ] What should I do about a direct debit that I did not set up?
+19 [ 0.54 -0.33 -0.36  1.21 -0.23] is there a foreign currencies charge?
+20 [ 0.8  -0.48  0.62  0.95  0.38] Why did I not get my refund yet?
+21 [1.19 2.07 0.74 0.15 0.7 ] I was mistakenly charged a fee for using my card.
+22 [-0.26  0.63 -0.46 -1.71 -0.37] The ATM charged me an extra fee, Why?
+23 [ 0.43  0.94  0.36 -1.62  0.57] My transaction went through but I was charged a fee. Why?
+24 [ 2.17  0.94  2.15 -1.48  1.22] Will I get charged fees when I add money with an international card?
+25 [ 0.47  1.19  0.61 -0.5  -0.48] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [ 0.64  0.38  0.37 -0.12  0.25] I don't think I made this transaction on my statement
+27 [ 0.06 -0.03 -0.26  1.03 -0.28] There is a strange charge on my debit statement
+28 [ 0.49  0.39  0.6  -1.07  0.61] Why do i have an extra fee on my statement?
+29 [ 0.27  0.72 -0.85 -0.68 -0.84] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [ 1.07  0.58  1.14 -1.39  0.67] What is this extra fee while I was doing a transfer?
+31 [0.3  1.16 0.47 0.53 0.35] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_normalized.py <<'PY'
+exec(open('inspect_probes.py').read().split('# Each direction')[0])
+# Normalize each authored marker before taking a semantic contrast. Raw markers
+# share a large positive common direction; it supplies a linear scale estimate.
+C=P/np.linalg.norm(P,axis=-1,keepdims=True)
+u=C.mean((0,1)); u/=np.linalg.norm(u)
+basis=[]
+def add(v):
+ v=v.astype(np.float64).copy()
+ for x in basis: v-=x*(v@x)
+ if np.linalg.norm(v)>1e-8: basis.append(v/np.linalg.norm(v))
+add(u)
+for j in [0,1,2,4]:
+ add(C[:,j].mean(0)-C[:,3].mean(0))
+ add(C[:16,j].mean(0)-C[16:32,j].mean(0))
+add(C[50:52,3].mean(0)-C[32:47,3].mean(0))
+d=C[:16,3].mean(0)-C[16:32,3].mean(0)
+for v in basis: d-=v*(d@v)
+p=C[:16,3].mean(0)@d; n=C[16:32,3].mean(0)@d
+w=(d-n*u)/(p-n)
+np.savez('directions.npz',w=w,u=u)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=(M@w)/(M@u)
+ for i,t in enumerate(ts): print(i,np.round(x[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_normalized.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 814ms:
+
+ probes
+0 [-0.26 -0.61 -0.1   0.99 -0.35] The exchange rate used for my card purchase was wrong.
+1 [-0.26  0.2  -0.32  0.15 -0.75] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.5   0.39 -0.52  1.55 -0.68] I paid abroad and the exchange rate was terrible.
+3 [ 0.06  0.09 -0.67  0.45  0.06] My ATM withdrawal used a bad conversion rate.
+4 [-0.4   0.48 -0.82  1.13 -0.81] The amount charged for my purchase is wrong because of the exchange rate.
+5 [1.35 0.99 1.26 1.47 0.97] Why did you convert my card transaction at such an unfair rate?
+6 [-0.63 -0.18 -0.68  0.07 -0.64] I received less cash than expected due to an incorrect exchange rate.
+7 [0.21 0.5  0.24 1.09 0.16] The rate applied to my overseas shopping does not match the market rate.
+8 [1.54 1.58 0.71 2.49 0.95] The foreign currency rate on this payment is not right.
+9 [0.82 0.95 0.84 1.26 1.25] I think the exchange rate for the money I took out is mistaken.
+10 [-0.25 -0.17 -0.13  1.36 -0.48] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.52  0.31 -0.28 -0.57 -0.5 ] You applied the wrong conversion rate when I withdrew dollars.
+12 [ 0.07 -0.23  0.83  0.73 -0.27] The exchange rate on my bank transfer abroad was incorrect.
+13 [1.05 0.62 1.67 1.37 1.95] Why is your exchange rate worse than the interbank rate?
+14 [0.4  0.08 0.34 1.76 0.05] The currency conversion rate looks wrong on this transaction.
+15 [-0.03  0.31 -0.64  0.83 -0.64] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [ 0.22  0.57 -0.24  1.29 -0.31] The amount charged for my card purchase was wrong.
+17 [-1.   -0.26 -0.86 -1.28 -0.97] The cash machine gave me the wrong amount of money.
+18 [-0.34 -0.12 -0.75 -0.87 -0.7 ] I paid abroad and the payment was declined.
+19 [1.16 0.83 0.42 0.25 0.68] My ATM withdrawal is pending.
+20 [ 2.09 -1.38  2.35  1.1   1.95] The amount charged for my purchase is wrong because I was charged twice.
+21 [-0.67  0.41 -0.76 -0.73 -0.68] Why did you decline my card transaction?
+22 [-0.59  0.27 -0.47 -0.63 -0.56] I received less cash than requested but the full amount was debited.
+23 [-0.06  0.95  0.22  0.93  0.13] The charge for my overseas shopping does not match my receipt.
+24 [0.39 0.34 0.04 0.76 0.28] The foreign currency payment is not recognised.
+25 [-0.27  0.67 -0.25 -0.4  -0.33] I think the money I took out was deducted twice.
+26 [1.46 1.64 1.2  1.08 1.56] My purchase in euros was reversed but I have no refund.
+27 [ 0.07  0.21  0.08 -0.06  0.05] You debited my account but the ATM did not dispense dollars.
+28 [ 0.1   0.13  0.87 -0.48  0.43] The bank transfer abroad went to the incorrect account.
+29 [-0.23  0.99 -0.82 -0.84 -0.8 ] Why is my card payment still pending?
+30 [ 0.03 -0.15  0.59 -0.59 -0.33] The recipient account looks wrong on this transaction.
+31 [ 0.35 -0.27  0.14  0.28 -0.08] I bought a meal overseas and was overcharged by the restaurant.
+32 [0.67 0.76 0.67 0.15 0.42] How do I order a replacement card?
+33 [-0.16  0.11  0.6   0.1   0.7 ] I lost my debit card.
+34 [ 0.1   0.09 -0.1  -0.64  0.62] My contactless payment feature does not work.
+35 [-0.57  0.3  -0.36 -1.48  0.58] I forgot my card PIN.
+36 [ 0.79 -0.54 -0.28 -0.75  0.75] How do I activate my new card?
+37 [-0.15 -0.45  0.38 -0.41  0.16] How can I add my card to Apple Pay?
+38 [ 0.29 -0.2   0.91 -0.37 -0.65] Where is my bank transfer?
+39 [ 0.15 -0.54  0.76 -0.53 -0.18] How do I top up my account?
+40 [2.04 1.95 2.74 4.   2.42] My balance has not updated after my deposit.
+41 [ 0.5   1.14 -0.54 -0.59  0.7 ] I cannot verify my identity.
+42 [-0.19  0.05  0.18 -0.77  0.57] I forgot my app passcode.
+43 [1.53 1.45 1.35 0.94 1.49] Please close my account.
+44 [ 0.46  0.15  0.99 -0.28  0.99] I lost my phone.
+45 [0.8  0.91 1.09 0.49 1.23] Can I open an account in my country?
+46 [ 0.3   0.39  0.89 -0.24  0.77] I want to change my address.
+47 [2.46 1.81 2.36 2.84 2.58] What currencies can I hold?
+48 [ 0.4  -0.42  0.18  0.84 -0.47] How do I exchange euros into pounds?
+49 [ 0.26 -0.05  0.21  0.58 -0.19] What is your exchange rate today?
+50 [1.02 1.02 0.98 0.11 1.18] Why was I charged a cash withdrawal fee?
+51 [ 1.67  0.18  0.94 -0.46  0.39] What is the fee for an international transfer?
+52 [1.33 1.21 0.44 0.67 1.3 ] My card was stolen.
+53 [ 0.15 -0.34  0.35  0.03  0.41] I did not make this card purchase abroad.
+54 [0.41 0.07 0.75 0.05 0.59] A cash withdrawal I never made appeared on my account.
+55 [2.14 1.72 1.94 2.15 2.26] The merchant promised a refund but it has not arrived.
+56 [ 0.32  0.59  0.06 -0.11  0.05] My direct debit was taken twice.
+57 [-0.49  0.35 -0.42 -1.11 -0.41] I want to cancel a pending card payment.
+58 [0.91 0.54 1.01 0.62 1.14] The ATM kept my card.
+59 [ 0.03 -0.01 -0.17  0.06 -0.05] The card payment went through in the wrong currency.
+60 [2.77 2.58 3.25 3.13 4.53] How can I choose which currency to pay in?
+61 [2.26 1.69 1.84 1.9  2.13] Does my card support Japanese yen?
+62 [ 0.15 -0.04  0.98  0.83  0.82] How much cash may I withdraw overseas?
+63 [-0.02  0.45  0.47 -0.2   0.85] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [0.76 0.5  0.31 1.18 0.06] I was charged the wing amount for an item.
+1 [0.37 0.01 0.86 0.83 0.23] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [ 0.28  0.32 -0.39  0.41 -0.21] My card payment had the wrong exchange rate
+3 [-0.87 -0.79 -0.92  0.19 -0.84] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [-0.29 -0.06 -0.32  0.13 -0.58] I withdrew cash and I think the exchange rate is wrong.
+5 [ 0.03 -0.02  0.29  1.12 -0.42] When I got cash the exchange rate was wrong
+6 [-0.13  0.51 -0.38  0.64 -0.44] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [0.23 0.23 0.45 0.82 0.53] Why is the exchange rate on my card wrong?
+8 [ 0.02 -0.17 -0.05  0.91  0.04] I purchased something overseas and the incorrect exchange rate was applied.
+9 [-0.55  0.15 -0.67 -0.15 -0.49] The exchange rate was incorrect for this item I bought.
+10 [ 0.25 -0.32  0.33  1.02  0.4 ] The exchange rate for case abroad is applied wrong.
+11 [1.72 1.35 1.78 1.8  1.03] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [3.62 0.82 3.54 4.32 5.43] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [-0.5   0.57 -0.44  0.48 -0.32] Why was the wrong rate applied when I bought something in a different currency?
+14 [-0.25  0.29 -0.42  0.13 -0.46] There's an error in regards to the exchange rate for an item I bought.
+15 [ 0.83  0.81  1.26  1.61 -0.  ] what is the correct exchange rate for getting cash
+16 [-0.43  0.84 -0.61 -0.74 -0.79] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [-0.67  0.47 -0.17 -0.91 -0.72] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-0.42 -0.41  0.45 -0.74 -0.09] What should I do about a direct debit that I did not set up?
+19 [ 0.86 -0.21 -0.27  1.23 -0.23] is there a foreign currencies charge?
+20 [ 2.87 -0.52  2.77  3.9   1.89] Why did I not get my refund yet?
+21 [1.5  1.99 1.38 0.23 1.12] I was mistakenly charged a fee for using my card.
+22 [-0.17  0.73 -0.19 -2.   -0.2 ] The ATM charged me an extra fee, Why?
+23 [ 0.77  1.18  1.24 -2.07  1.48] My transaction went through but I was charged a fee. Why?
+24 [ 2.11  0.96  2.17 -1.49  1.26] Will I get charged fees when I add money with an international card?
+25 [ 0.19  0.9   0.36 -0.98 -0.83] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [ 0.45  0.39  0.25 -0.4   0.08] I don't think I made this transaction on my statement
+27 [ 0.24  0.18 -0.04  1.1  -0.1 ] There is a strange charge on my debit statement
+28 [ 0.64  0.44  1.26 -1.19  1.18] Why do i have an extra fee on my statement?
+29 [ 0.35  0.72 -0.77 -0.69 -0.81] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [ 1.33  0.68  1.27 -1.42  1.1 ] What is this extra fee while I was doing a transfer?
+31 [0.64 1.43 0.82 0.8  0.69] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > paired_probes.py <<'PY'
+import json,subprocess
+pairs=[]
+for template in [
+'The {} on my card purchase is wrong.',
+'I think the {} for my cash withdrawal is incorrect.',
+'Why is the {} on this payment so bad?',
+'The {} applied when I bought something abroad was incorrect.',
+'There is a mistake in the {} on my ATM transaction.',
+'I am unhappy with the {} used for my overseas purchase.',
+'Please check the {} for the cash I took out.',
+'The {} on my statement does not look right.',
+'I got less money than expected because the {} was wrong.',
+'I paid too much for this item due to an incorrect {}.',
+'Can you explain the {} used when I paid in euros?',
+'You used the wrong {} when I withdrew money.',
+]:
+ for target,control in [('exchange rate','amount'),('currency conversion rate','transaction amount')]:
+  pairs.append([template.format(target),template.format(control)])
+texts=[p[0] for p in pairs]+[p[1] for p in pairs]
+json.dump(texts,open('paired.json','w'),indent=2)
+subprocess.run(['<lab>/.venv/bin/python','embed.py','paired_M.npz']+texts,check=True)
+PY
+<lab>/.venv/bin/python paired_probes.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 26556ms:
+W1104 11:19:16.966000 55233 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote paired_M.npz 48 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_axes.py <<'PY'
+exec(open('inspect_probes.py').read().split('# Each direction')[0])
+A=np.load('paired_M.npz')['M'].astype(np.float64)
+# Three nuisance directions: common activation, clear matches, ambiguous matches.
+basis=[]
+def add(v):
+ v=v.astype(np.float64).copy()
+ for u in basis: v-=u*(v@u)
+ basis.append(v/np.linalg.norm(v))
+add(P.mean((0,1)))
+strong=[(36,0),(38,2),(41,4),(50,3),(20,1)]
+add(np.mean([P[i,j]-np.delete(P[i],j,0).mean(0) for i,j in strong],0))
+# Common nuisance between related options on an ambiguous transaction complaint.
+add(P[16:32,1].mean(0)-P[16:32,[0,2,4]].mean((0,1)))
+def clean(d):
+ for u in basis:d=d-u*(d@u)
+ return d
+# Shared exchange-rate language across all options.
+p=A[:24].mean((0,1));n=A[24:].mean((0,1));d=clean(p-n)
+w=d/(d@(p-n)); b=-(n@w)
+# Option identity from paired texts; remove the same general relevance axes.
+p=A[:,3].mean(0);n=A[:,[0,1,2,4]].mean((0,1));d=clean(p-n)
+v=d/(d@(p-n));c=-(n@v)
+np.savez('directions.npz',w=w,b=b,v=v,c=c)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=M@w+b;y=M@v+c
+ for i,t in enumerate(ts): print(i,'fx',np.round(x[i],2),'fee',np.round(y[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_axes.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 680ms:
+
+ probes
+0 fx [ 4.79  0.86 -0.41 -0.96 -1.64] fee [-2.91  0.52  1.3   2.36  1.75] The exchange rate used for my card purchase was wrong.
+1 fx [ 1.21 -0.41 -0.67 -1.82 -1.53] fee [-0.32  1.61  1.19  2.25  1.42] The currency conversion on my cash withdrawal is incorrect.
+2 fx [ 1.29 -0.38 -1.39 -1.19 -1.73] fee [-0.25  2.03  1.78  2.94  1.52] I paid abroad and the exchange rate was terrible.
+3 fx [ 2.24  0.09 -1.61 -0.68 -0.72] fee [-0.89  0.56  1.65  1.83  1.67] My ATM withdrawal used a bad conversion rate.
+4 fx [ 1.09 -1.01 -1.23 -1.83 -2.09] fee [-0.32  0.8   0.75  1.63  0.79] The amount charged for my purchase is wrong because of the exchange rate.
+5 fx [8.01 4.87 1.71 1.05 2.21] fee [-5.02 -2.14 -1.67 -1.39 -1.66] Why did you convert my card transaction at such an unfair rate?
+6 fx [ 1.33  1.03 -0.58  0.07 -0.69] fee [-0.83  0.27  0.36  0.76  0.5 ] I received less cash than expected due to an incorrect exchange rate.
+7 fx [ 1.02 -0.79 -0.88 -1.38 -1.04] fee [0.1  2.27 1.58 2.7  1.33] The rate applied to my overseas shopping does not match the market rate.
+8 fx [ 2.49  0.67 -0.09 -0.04 -1.09] fee [-0.53  1.62  0.65  2.23  0.81] The foreign currency rate on this payment is not right.
+9 fx [4.07 0.08 2.2  1.77 0.55] fee [-2.3   1.95 -0.88 -0.19 -0.61] I think the exchange rate for the money I took out is mistaken.
+10 fx [ 1.72  0.9  -0.41 -0.21 -1.22] fee [-0.81  0.53  1.07  1.78  1.02] My purchase was converted from euros to pounds at the wrong rate.
+11 fx [ 1.48  0.73 -0.28 -1.65 -0.82] fee [-0.9  -1.56  0.75  0.92  0.84] You applied the wrong conversion rate when I withdrew dollars.
+12 fx [ 1.8   1.    1.32 -0.11 -0.53] fee [-0.7   0.68  0.38  1.31  0.88] The exchange rate on my bank transfer abroad was incorrect.
+13 fx [3.95 3.82 2.31 3.07 1.72] fee [-2.98 -1.9  -2.28 -1.49 -1.86] Why is your exchange rate worse than the interbank rate?
+14 fx [ 1.8   1.65  0.72  0.68 -0.62] fee [-0.64  0.17  0.39  1.13  0.68] The currency conversion rate looks wrong on this transaction.
+15 fx [ 2.69  0.89 -0.42  1.52 -0.83] fee [-1.41  0.81  0.47 -1.94  0.6 ] I bought a meal overseas and was overcharged due to the conversion rate.
+16 fx [ 3.24 -4.03 -1.37  0.99 -1.07] fee [-1.8   2.08  0.56  0.98  0.58] The amount charged for my card purchase was wrong.
+17 fx [ 2.02  2.12  0.37 -1.82  0.14] fee [-1.53 -2.66 -0.03  0.22  0.05] The cash machine gave me the wrong amount of money.
+18 fx [ 2.49  2.47 -0.54 -1.01 -0.44] fee [-1.43 -2.68  0.49  0.73  0.54] I paid abroad and the payment was declined.
+19 fx [ 3.01  1.3   0.95 -0.07  1.51] fee [-1.45  0.19  0.05  0.4  -0.05] My ATM withdrawal is pending.
+20 fx [ 0.56  5.39 -0.63  4.   -0.19] fee [-1.59 -2.74 -0.97 -1.24 -1.02] The amount charged for my purchase is wrong because I was charged twice.
+21 fx [ 5.79  1.53  0.49 -0.96  0.97] fee [-4.01 -0.67 -0.38 -0.1  -0.31] Why did you decline my card transaction?
+22 fx [ 1.8   2.04  0.38 -1.18  0.55] fee [-1.2  -1.98 -0.08  0.16 -0.15] I received less cash than requested but the full amount was debited.
+23 fx [ 2.63  1.93 -0.61  0.48 -0.52] fee [-2.08  0.03 -0.83 -1.22 -0.69] The charge for my overseas shopping does not match my receipt.
+24 fx [ 2.21 -1.75 -1.44 -2.98 -2.03] fee [-0.49  2.68  2.04  3.88  2.92] The foreign currency payment is not recognised.
+25 fx [ 0.48 -3.32 -0.28 -1.12 -0.45] fee [-0.53  1.35  0.22  0.42  0.38] I think the money I took out was deducted twice.
+26 fx [2.51 3.03 0.91 0.79 0.12] fee [-1.85 -0.56 -0.32 -0.02 -0.51] My purchase in euros was reversed but I have no refund.
+27 fx [4.7  3.08 2.07 1.42 2.51] fee [-2.88 -2.03 -1.28 -1.16 -1.35] You debited my account but the ATM did not dispense dollars.
+28 fx [ 2.34 -0.25 -0.   -1.83  0.75] fee [-1.16  0.13  1.48  1.37  0.53] The bank transfer abroad went to the incorrect account.
+29 fx [ 5.03 -0.68 -1.27 -1.59  0.32] fee [-4.34  0.53  0.1   0.24 -0.13] Why is my card payment still pending?
+30 fx [ 0.98  0.49  0.38 -2.13 -1.28] fee [-0.11 -1.34  0.94  1.52  1.49] The recipient account looks wrong on this transaction.
+31 fx [4.76 2.12 0.93 1.72 0.71] fee [-2.88 -0.68  0.   -0.51 -0.02] I bought a meal overseas and was overcharged by the restaurant.
+32 fx [ 0.8  -1.13 -1.22 -2.43 -1.68] fee [0.12 2.61 2.23 1.89 2.37] How do I order a replacement card?
+33 fx [ 5.18  1.63  0.69 -0.64  0.72] fee [-3.5  -0.12  0.48  0.26  0.67] I lost my debit card.
+34 fx [ 3.3   0.   -1.25 -1.61 -0.  ] fee [-1.47  1.41  1.78  1.25  1.35] My contactless payment feature does not work.
+35 fx [ 0.95 -2.61 -2.23 -3.24 -2.38] fee [-0.05  3.65  2.73  2.16  2.27] I forgot my card PIN.
+36 fx [-3.86 -2.59 -2.68 -4.35 -0.84] fee [2.05 2.7  2.71 2.52 2.39] How do I activate my new card?
+37 fx [-0.36 -2.11 -1.53 -3.09 -1.82] fee [0.99 2.5  2.54 2.02 2.56] How can I add my card to Apple Pay?
+38 fx [ 2.14  0.55 -3.01 -2.33 -1.34] fee [-0.71  0.85  1.08  0.31  1.  ] Where is my bank transfer?
+39 fx [ 2.27 -1.45  0.39 -3.05 -1.57] fee [-0.79  2.06 -0.94  1.56  1.88] How do I top up my account?
+40 fx [8.94 6.98 7.84 1.44 3.44] fee [-5.17 -3.14 -3.52 -1.7  -2.15] My balance has not updated after my deposit.
+41 fx [ 1.03 -0.38 -0.13 -1.77 -2.43] fee [0.03 2.19 0.44 0.39 1.69] I cannot verify my identity.
+42 fx [ 2.39 -0.58 -1.   -2.22 -0.53] fee [-1.1   1.73  1.82  1.5   0.16] I forgot my app passcode.
+43 fx [ 2.5   0.73  1.44 -0.12  0.33] fee [-0.9   1.18  0.27  0.44  1.51] Please close my account.
+44 fx [ 3.31 -1.12  0.25 -2.54  0.76] fee [-1.69  2.02  1.18  2.36  0.81] I lost my phone.
+45 fx [ 2.89  0.53  1.35 -1.26  1.56] fee [-1.33  1.    0.3   1.4   0.2 ] Can I open an account in my country?
+46 fx [ 2.35 -1.54  0.54 -1.89 -0.37] fee [-0.78  2.58  0.84  1.69  1.67] I want to change my address.
+47 fx [9.23 4.48 4.58 1.59 2.1 ] fee [-4.82 -1.24 -1.16 -0.33 -0.54] What currencies can I hold?
+48 fx [ 1.86  0.3   0.49  0.91 -1.77] fee [-0.64  0.76  0.75  0.83  0.98] How do I exchange euros into pounds?
+49 fx [-0.79 -1.76 -1.76 -1.53 -1.6 ] fee [1.55 2.7  2.53 2.51 1.61] What is your exchange rate today?
+50 fx [ 0.47  4.62 -0.31  2.72 -0.61] fee [-1.67 -1.43 -1.19 -0.91 -1.02] Why was I charged a cash withdrawal fee?
+51 fx [ 3.04  0.33  0.51  2.35 -0.54] fee [-0.82  1.1   1.25 -0.55  0.56] What is the fee for an international transfer?
+52 fx [ 5.1   3.73  1.07 -0.74  3.6 ] fee [-2.91 -1.11 -0.41 -0.23 -1.2 ] My card was stolen.
+53 fx [ 4.32  0.8  -0.26 -0.67 -0.11] fee [-2.32 -0.32  1.06  0.68  1.04] I did not make this card purchase abroad.
+54 fx [ 1.87  0.04  0.22 -0.52  0.47] fee [-0.64  0.54  1.21  0.79  0.82] A cash withdrawal I never made appeared on my account.
+55 fx [3.88 1.71 1.62 0.67 0.84] fee [-1.68  0.78 -0.32 -0.56 -0.66] The merchant promised a refund but it has not arrived.
+56 fx [3.07 1.03 0.69 0.27 0.8 ] fee [-1.74 -1.23 -0.1   0.16 -0.03] My direct debit was taken twice.
+57 fx [ 4.23 -0.6  -1.88 -2.42 -2.04] fee [-3.04  1.32  2.08  1.59  2.34] I want to cancel a pending card payment.
+58 fx [6.38 2.98 1.87 1.25 1.97] fee [-3.79 -1.13 -0.38 -0.5  -0.13] The ATM kept my card.
+59 fx [ 4.35 -0.05 -0.67 -1.33 -0.66] fee [-2.55  1.04  0.88  1.52  1.08] The card payment went through in the wrong currency.
+60 fx [8.72 5.15 4.84 5.34 2.44] fee [-5.24 -2.71 -2.73 -2.49 -1.91] How can I choose which currency to pay in?
+61 fx [ 5.21  2.85  2.36  0.84 -0.28] fee [-1.89  0.08  0.16  0.72  0.42] Does my card support Japanese yen?
+62 fx [ 1.8  -0.52  1.55 -0.74  0.67] fee [-0.08  1.8   0.56  2.26  1.22] How much cash may I withdraw overseas?
+63 fx [ 2.68 -1.28 -1.3  -2.94 -1.1 ] fee [-1.    2.42  2.32  2.88  2.51] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 fx [ 2.62  0.32  0.17  1.79 -0.52] fee [-0.91  0.37  0.69  0.31  0.75] I was charged the wing amount for an item.
+1 fx [ 2.48  1.73  2.55  0.64 -0.06] fee [-1.    0.29 -0.37  0.96  1.01] When I made a cash transfer abroad the wrong exchange rate was applied
+2 fx [ 4.46  0.24 -1.53 -0.78 -1.32] fee [-2.41  0.07  1.19  1.68  1.42] My card payment had the wrong exchange rate
+3 fx [ 0.59  0.1  -1.12 -0.57 -1.76] fee [-0.09  1.09  0.45  1.74  0.78] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 fx [ 1.89  1.54 -0.   -0.45 -1.02] fee [-1.08 -1.66  0.38  0.93  0.57] I withdrew cash and I think the exchange rate is wrong.
+5 fx [ 1.1  -0.73 -0.47 -0.48 -1.85] fee [-0.17  1.74  1.41  1.91  1.36] When I got cash the exchange rate was wrong
+6 fx [ 1.24  0.06 -0.16 -0.02 -0.76] fee [-0.46  1.35  0.48  1.3   0.49] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 fx [5.84 4.3  0.78 2.06 0.76] fee [-3.75 -2.07 -1.34 -0.75 -1.18] Why is the exchange rate on my card wrong?
+8 fx [2.97 1.58 0.59 1.18 0.23] fee [-1.56 -0.42  0.25  0.56  0.57] I purchased something overseas and the incorrect exchange rate was applied.
+9 fx [3.83 2.57 0.97 1.53 0.29] fee [-2.69 -0.54 -1.1  -0.68 -0.8 ] The exchange rate was incorrect for this item I bought.
+10 fx [3.55 0.48 0.74 0.04 0.27] fee [-1.8   0.79  0.66  1.48  1.02] The exchange rate for case abroad is applied wrong.
+11 fx [3.53 2.27 2.52 1.73 0.87] fee [-1.27  0.14 -0.06  0.2   0.09] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 fx [ 4.01 11.47  3.73  2.96  2.04] fee [-2.83 -6.71 -2.52 -2.13 -1.84] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 fx [2.93 2.37 0.59 1.85 0.52] fee [-2.32 -0.23 -0.84 -0.42 -0.53] Why was the wrong rate applied when I bought something in a different currency?
+14 fx [ 2.45  0.34  0.42  0.23 -0.49] fee [-1.38  1.04  0.09  0.66  0.32] There's an error in regards to the exchange rate for an item I bought.
+15 fx [1.72 1.12 1.12 1.07 0.17] fee [-0.32  0.71  0.65  0.87  0.27] what is the correct exchange rate for getting cash
+16 fx [ 5.9  -0.88 -0.02 -1.34 -0.4 ] fee [-4.9   0.6   0.17  0.3   0.06] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 fx [ 1.45 -0.19  1.82 -0.64  0.74] fee [-1.33 -0.16 -0.77 -0.09 -0.45] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 fx [ 3.32 -1.83  0.29 -2.06 -0.7 ] fee [-1.98  2.32  0.9   1.55  1.38] What should I do about a direct debit that I did not set up?
+19 fx [ 1.32 -0.15 -1.19 -3.8  -2.12] fee [-0.03  1.35  1.47  2.23  1.79] is there a foreign currencies charge?
+20 fx [ 2.05 10.47  1.05  0.18  1.66] fee [-2.68 -6.43 -2.07 -1.77 -2.27] Why did I not get my refund yet?
+21 fx [ 2.84  0.86 -1.84  1.04 -1.39] fee [-0.83  1.86  0.5  -0.15  0.58] I was mistakenly charged a fee for using my card.
+22 fx [ 3.85  4.09 -0.93  6.22 -0.83] fee [-2.61 -1.24 -0.6  -2.76 -0.48] The ATM charged me an extra fee, Why?
+23 fx [ 2.84  4.35  0.36  7.56 -0.17] fee [-2.17 -1.26 -1.26 -3.12 -0.96] My transaction went through but I was charged a fee. Why?
+24 fx [ 3.25 -0.5   0.71  4.13 -2.02] fee [-0.53  2.08  1.85 -1.11  2.33] Will I get charged fees when I add money with an international card?
+25 fx [ 0.26 -1.12 -1.21 -3.23 -2.49] fee [1.29 3.14 2.78 1.88 2.14] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 fx [-0.39 -1.63 -1.45 -2.   -1.6 ] fee [1.65 2.82 2.41 1.97 2.55] I don't think I made this transaction on my statement
+27 fx [3.69 3.01 0.9  2.99 0.83] fee [-2.41 -1.23 -0.8  -0.87 -0.76] There is a strange charge on my debit statement
+28 fx [ 2.84  1.87 -1.31  6.66 -1.49] fee [-1.56 -0.16 -0.2  -3.44  0.02] Why do i have an extra fee on my statement?
+29 fx [ 6.36  1.62 -0.41 -1.21  0.13] fee [-3.86 -1.58 -0.41 -0.19 -0.32] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fx [ 2.87  1.37  1.35  4.74 -0.87] fee [-0.77  0.74  0.77 -1.76  0.21] What is this extra fee while I was doing a transfer?
+31 fx [3.55 2.88 2.23 0.74 2.06] fee [-2.12 -1.12 -0.77 -0.37 -0.78] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "python3 - <<'PY'
+p=open('inspect_projected.py').read();p=p.replace(\"basis=[]\", \"A=np.load('paired_M.npz')['M']\\nbasis=[]\")
+p=p.replace('add(P[:,j].mean(0))','add(A[:,j].mean(0))').replace('P[:16,j].mean(0)-P[16:32,j].mean(0)','A[:24,j].mean(0)-A[24:,j].mean(0)')
+p=p.replace('add(P[16:,3].mean(0))','add(A[24:,3].mean(0))').replace('d=P[:16,3].mean(0)-P[16:32,3].mean(0)','d=A[:24,3].mean(0)-A[24:,3].mean(0)').replace('p=P[:16,3].mean(0)@d; n=P[16:32,3].mean(0)@d','p=A[:24,3].mean(0)@d; n=A[24:,3].mean(0)@d')
+open('inspect_pair_direction.py','w').write(p)
+PY
+<lab>/.venv/bin/python inspect_pair_direction.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 721ms:
+
+ probes
+0 [0.14 0.33 0.3  1.46 0.13] The exchange rate used for my card purchase was wrong.
+1 [-0.11 -0.15 -0.13  0.48 -0.38] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.2  -0.16 -0.08  0.86  0.01] I paid abroad and the exchange rate was terrible.
+3 [-0.23 -0.34 -0.55  0.37 -0.01] My ATM withdrawal used a bad conversion rate.
+4 [ 0.27  0.08  0.01  0.57 -0.08] The amount charged for my purchase is wrong because of the exchange rate.
+5 [ 0.16 -0.03  0.05  0.23  0.07] Why did you convert my card transaction at such an unfair rate?
+6 [0.18 0.13 0.09 0.86 0.14] I received less cash than expected due to an incorrect exchange rate.
+7 [0.12 0.21 0.18 0.97 0.27] The rate applied to my overseas shopping does not match the market rate.
+8 [ 0.41  0.66 -0.25  1.61 -0.29] The foreign currency rate on this payment is not right.
+9 [-0.36  0.5  -0.05  0.68 -0.2 ] I think the exchange rate for the money I took out is mistaken.
+10 [0.08 0.29 0.21 1.27 0.05] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.07 -0.25 -0.01  0.05 -0.06] You applied the wrong conversion rate when I withdrew dollars.
+12 [0.33 0.33 0.84 1.21 0.26] The exchange rate on my bank transfer abroad was incorrect.
+13 [-0.2  -0.51 -0.12  0.32  0.06] Why is your exchange rate worse than the interbank rate?
+14 [0.17 0.33 0.22 1.36 0.04] The currency conversion rate looks wrong on this transaction.
+15 [ 0.36  0.6   0.16 -0.11  0.17] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [ 0.    1.29 -0.25  0.97 -0.16] The amount charged for my card purchase was wrong.
+17 [ 0.04 -0.49  0.09 -0.12  0.12] The cash machine gave me the wrong amount of money.
+18 [ 0.39 -0.45  0.18  0.28  0.25] I paid abroad and the payment was declined.
+19 [0.49 0.69 0.2  0.27 0.51] My ATM withdrawal is pending.
+20 [-0.14 -0.81 -0.13  0.63 -0.2 ] The amount charged for my purchase is wrong because I was charged twice.
+21 [-0.9  -0.22 -0.15 -0.08 -0.02] Why did you decline my card transaction?
+22 [ 0.24 -0.39  0.26  0.11  0.25] I received less cash than requested but the full amount was debited.
+23 [-0.04  0.83 -0.25  0.21 -0.16] The charge for my overseas shopping does not match my receipt.
+24 [ 0.23 -0.21  0.16  0.76  0.38] The foreign currency payment is not recognised.
+25 [0.09 0.53 0.29 0.24 0.32] I think the money I took out was deducted twice.
+26 [-0.12  0.84  0.28  0.42 -0.24] My purchase in euros was reversed but I have no refund.
+27 [-0.13 -0.31  0.09  0.17  0.12] You debited my account but the ATM did not dispense dollars.
+28 [0.31 0.03 1.11 0.18 0.72] The bank transfer abroad went to the incorrect account.
+29 [-0.96 -0.26 -0.1   0.02  0.1 ] Why is my card payment still pending?
+30 [ 0.28 -0.32  0.62  0.01  0.16] The recipient account looks wrong on this transaction.
+31 [0.41 0.34 0.35 0.47 0.25] I bought a meal overseas and was overcharged by the restaurant.
+32 [ 0.96  0.58  0.48 -0.01  0.35] How do I order a replacement card?
+33 [-0.01  0.62  0.58  0.17  0.74] I lost my debit card.
+34 [-0.27 -0.08 -0.11 -0.17  0.33] My contactless payment feature does not work.
+35 [-0.85  0.14 -0.27 -0.86  0.13] I forgot my card PIN.
+36 [ 0.91 -0.25 -0.07 -0.7   0.82] How do I activate my new card?
+37 [0.4  0.09 0.61 0.07 0.65] How can I add my card to Apple Pay?
+38 [ 0.33  0.01  0.18 -0.24 -0.02] Where is my bank transfer?
+39 [ 0.25 -0.28 -0.08 -0.27  0.12] How do I top up my account?
+40 [-0.18 -0.11  0.39  0.23 -0.02] My balance has not updated after my deposit.
+41 [ 0.17  0.24  0.01 -0.1   1.09] I cannot verify my identity.
+42 [ 0.44  0.68  0.5  -0.04  0.42] I forgot my app passcode.
+43 [0.57 0.85 0.69 0.33 1.42] Please close my account.
+44 [-0.22  0.08  0.24 -0.41  0.26] I lost my phone.
+45 [0.35 0.36 0.43 0.13 0.68] Can I open an account in my country?
+46 [ 0.01  0.11  0.49 -0.01  0.51] I want to change my address.
+47 [-0.34 -0.35  0.09  0.34  0.2 ] What currencies can I hold?
+48 [0.44 0.08 0.5  1.13 0.04] How do I exchange euros into pounds?
+49 [-0.22 -0.31  0.02  0.53  0.03] What is your exchange rate today?
+50 [ 0.36  0.22  0.2  -0.26  0.33] Why was I charged a cash withdrawal fee?
+51 [0.51 0.18 0.6  0.01 0.46] What is the fee for an international transfer?
+52 [ 0.21  0.24 -0.05 -0.37  0.44] My card was stolen.
+53 [ 0.13 -0.25  0.37  0.24  0.45] I did not make this card purchase abroad.
+54 [ 0.49 -0.19  0.55  0.35  0.6 ] A cash withdrawal I never made appeared on my account.
+55 [-0.05  0.57  0.23 -0.21 -0.28] The merchant promised a refund but it has not arrived.
+56 [ 0.53 -0.4   0.3   0.39  0.4 ] My direct debit was taken twice.
+57 [-0.63  0.03 -0.3  -0.55 -0.2 ] I want to cancel a pending card payment.
+58 [-0.06 -0.08  0.2   0.18  0.2 ] The ATM kept my card.
+59 [ 0.29 -0.09  0.14  0.54  0.31] The card payment went through in the wrong currency.
+60 [-0.35 -0.48 -0.27  0.17  0.  ] How can I choose which currency to pay in?
+61 [1.2  0.29 0.5  0.72 0.31] Does my card support Japanese yen?
+62 [-0.33 -0.5   0.22  0.43  0.34] How much cash may I withdraw overseas?
+63 [-0.57  0.17  0.13 -0.06  0.72] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [0.47 0.54 0.23 0.9  0.01] I was charged the wing amount for an item.
+1 [0.57 0.44 0.94 1.26 0.65] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [0.61 0.17 0.05 0.98 0.23] My card payment had the wrong exchange rate
+3 [-0.44 -0.73 -0.28  0.35 -0.24] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [ 0.34 -0.31  0.31  0.91  0.21] I withdrew cash and I think the exchange rate is wrong.
+5 [0.42 0.01 0.57 1.37 0.1 ] When I got cash the exchange rate was wrong
+6 [ 0.01  0.34 -0.11  0.82 -0.08] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [-0.66 -0.59 -0.47  0.29 -0.33] Why is the exchange rate on my card wrong?
+8 [ 0.27 -0.08  0.35  1.3   0.46] I purchased something overseas and the incorrect exchange rate was applied.
+9 [-0.16  0.07 -0.12  0.33 -0.01] The exchange rate was incorrect for this item I bought.
+10 [0.68 0.39 0.91 1.57 0.98] The exchange rate for case abroad is applied wrong.
+11 [0.5  0.32 0.64 1.06 0.66] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [ 0.35 -1.17  0.23  0.67  0.56] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [-0.26  0.37 -0.19  0.58  0.02] Why was the wrong rate applied when I bought something in a different currency?
+14 [0.09 0.27 0.04 0.69 0.07] There's an error in regards to the exchange rate for an item I bought.
+15 [0.51 0.37 0.73 1.17 0.35] what is the correct exchange rate for getting cash
+16 [-1.19 -0.33 -0.01 -0.   -0.11] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [ 0.16 -0.15  0.42  0.08  0.21] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [ 0.03 -0.1   0.58 -0.11  0.4 ] What should I do about a direct debit that I did not set up?
+19 [0.65 0.17 0.23 1.16 0.3 ] is there a foreign currencies charge?
+20 [ 0.6  -1.14  0.46  0.62  0.35] Why did I not get my refund yet?
+21 [ 0.34  1.18 -0.61  0.29 -0.41] I was mistakenly charged a fee for using my card.
+22 [ 0.11 -0.   -0.13 -0.7  -0.05] The ATM charged me an extra fee, Why?
+23 [ 0.24  0.38  0.03 -1.13  0.2 ] My transaction went through but I was charged a fee. Why?
+24 [ 1.25  0.18  1.35 -0.02  0.19] Will I get charged fees when I add money with an international card?
+25 [-0.63 -0.06 -0.62 -0.92 -0.9 ] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [-0.21  0.02 -0.23 -0.33 -0.28] I don't think I made this transaction on my statement
+27 [ 0.18 -0.08  0.01  0.95 -0.01] There is a strange charge on my debit statement
+28 [ 0.01  0.1  -0.27 -1.34 -0.11] Why do i have an extra fee on my statement?
+29 [ 0.01 -0.49 -0.07  0.04 -0.01] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [ 0.48  0.23  0.63 -0.64 -0.02] What is this extra fee while I was doing a transfer?
+31 [-0.02  0.23  0.23  0.27  0.23] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_topic.py <<'PY'
+exec(open('inspect_probes.py').read().split('# Each direction')[0])
+A=np.load('paired_M.npz')['M'].astype(np.float64)
+basis=[]
+def add(v):
+ v=v.astype(np.float64).copy()
+ for u in basis:v-=u*(v@u)
+ basis.append(v/np.linalg.norm(v))
+for j in range(5):add(A[:,j].mean(0))
+for i,j in [(36,0),(38,2),(41,4),(50,3),(20,1)]:
+ add(P[i,j]-np.delete(P[i],j,0).mean(0))
+p=A[:24].mean((0,1));n=A[24:].mean((0,1));d=p-n
+for u in basis:d-=u*(d@u)
+w=d/(d@(p-n));b=-(n@w)
+np.savez('topic.npz',w=w,b=b)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=M@w+b
+ for i,t in enumerate(ts): print(i,np.round(x[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_topic.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 676ms:
+
+ probes
+0 [ 0.   -0.81 -1.   -0.83 -1.13] The exchange rate used for my card purchase was wrong.
+1 [-0.89 -0.61 -0.84 -1.08 -0.89] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.82 -0.68 -1.29 -0.44 -0.94] I paid abroad and the exchange rate was terrible.
+3 [-0.83 -0.4  -1.11 -0.99 -1.12] My ATM withdrawal used a bad conversion rate.
+4 [-1.08 -0.35 -0.81 -0.37 -0.86] The amount charged for my purchase is wrong because of the exchange rate.
+5 [3.95 3.15 3.12 3.04 3.27] Why did you convert my card transaction at such an unfair rate?
+6 [-0.76 -0.04 -0.51 -0.42 -0.45] I received less cash than expected due to an incorrect exchange rate.
+7 [-1.02 -0.92 -0.77 -0.92 -0.45] The rate applied to my overseas shopping does not match the market rate.
+8 [1.93 1.88 1.93 2.1  1.86] The foreign currency rate on this payment is not right.
+9 [2.45 1.35 2.63 2.61 2.66] I think the exchange rate for the money I took out is mistaken.
+10 [-0.69 -0.1  -0.48 -0.03 -0.43] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.14  0.2  -0.15 -0.34 -0.16] You applied the wrong conversion rate when I withdrew dollars.
+12 [-0.53 -0.24  0.21 -0.24 -0.34] The exchange rate on my bank transfer abroad was incorrect.
+13 [3.16 2.98 3.42 3.16 3.41] Why is your exchange rate worse than the interbank rate?
+14 [-0.01  0.58  0.4   0.83  0.43] The currency conversion rate looks wrong on this transaction.
+15 [-0.32 -0.16 -0.43  0.82 -0.33] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [ 1.01 -0.63  0.33  1.36  0.54] The amount charged for my card purchase was wrong.
+17 [-0.41  0.14 -0.37 -0.8  -0.29] The cash machine gave me the wrong amount of money.
+18 [-0.34  0.36 -0.68 -0.65 -0.52] I paid abroad and the payment was declined.
+19 [1.17 1.07 1.08 1.09 1.35] My ATM withdrawal is pending.
+20 [3.25 3.44 3.1  4.04 3.38] The amount charged for my purchase is wrong because I was charged twice.
+21 [0.58 0.4  0.26 0.05 0.28] Why did you decline my card transaction?
+22 [ 0.13  0.45  0.3  -0.01  0.48] I received less cash than requested but the full amount was debited.
+23 [1.65 1.31 1.11 1.08 1.25] The charge for my overseas shopping does not match my receipt.
+24 [-0.59 -1.03 -1.11 -1.7  -1.45] The foreign currency payment is not recognised.
+25 [ 0.31 -0.44  0.43  0.19  0.54] I think the money I took out was deducted twice.
+26 [3.73 3.78 3.33 3.27 3.41] My purchase in euros was reversed but I have no refund.
+27 [1.34 0.88 1.45 1.47 1.51] You debited my account but the ATM did not dispense dollars.
+28 [-0.75 -0.55 -0.57 -0.87 -0.24] The bank transfer abroad went to the incorrect account.
+29 [ 0.5  -0.07 -0.52 -0.5   0.07] Why is my card payment still pending?
+30 [-1.11 -0.52 -0.51 -0.93 -0.98] The recipient account looks wrong on this transaction.
+31 [ 0.59 -0.01 -0.04  0.26  0.07] I bought a meal overseas and was overcharged by the restaurant.
+32 [ 0.13 -0.12 -0.07 -0.04 -0.19] How do I order a replacement card?
+33 [0.58 0.14 0.38 0.45 0.36] I lost my debit card.
+34 [-0.31 -0.54 -1.01 -0.71 -0.34] My contactless payment feature does not work.
+35 [-1.65 -2.04 -2.09 -1.95 -1.2 ] I forgot my card PIN.
+36 [-0.84 -0.91 -0.92 -1.47 -0.07] How do I activate my new card?
+37 [-1.77 -1.64 -1.47 -1.28 -1.46] How can I add my card to Apple Pay?
+38 [-0.3  -0.33 -0.38 -0.48 -0.42] Where is my bank transfer?
+39 [-0.53 -1.2   0.44 -0.99 -0.84] How do I top up my account?
+40 [7.   6.94 7.17 5.87 6.14] My balance has not updated after my deposit.
+41 [0.12 0.79 0.4  0.16 0.36] I cannot verify my identity.
+42 [-1.16 -1.33 -1.62 -1.34 -0.47] I forgot my app passcode.
+43 [1.8  1.49 2.12 1.99 1.4 ] Please close my account.
+44 [-0.35 -1.31 -0.52 -1.34 -0.25] I lost my phone.
+45 [0.27 0.22 0.64 0.06 0.82] Can I open an account in my country?
+46 [-0.83 -1.59 -0.49 -1.08 -0.92] I want to change my address.
+47 [6.97 5.93 6.08 5.52 5.66] What currencies can I hold?
+48 [-0.26 -0.11  0.09  0.57 -0.21] How do I exchange euros into pounds?
+49 [-2.01 -1.76 -1.6  -1.13 -0.84] What is your exchange rate today?
+50 [2.12 3.76 2.1  2.55 2.21] Why was I charged a cash withdrawal fee?
+51 [2.11 1.27 1.6  2.03 1.41] What is the fee for an international transfer?
+52 [2.56 2.69 1.93 1.68 2.82] My card was stolen.
+53 [ 0.02 -0.62 -0.67 -0.06 -0.52] I did not make this card purchase abroad.
+54 [-0.33 -0.68 -0.41 -0.05 -0.18] A cash withdrawal I never made appeared on my account.
+55 [3.57 3.15 3.71 3.79 3.86] The merchant promised a refund but it has not arrived.
+56 [0.46 0.51 0.38 0.36 0.43] My direct debit was taken twice.
+57 [-0.23 -0.76 -1.41 -1.23 -1.53] I want to cancel a pending card payment.
+58 [1.62 0.88 1.13 1.3  1.04] The ATM kept my card.
+59 [ 0.19 -0.46 -0.59 -0.63 -0.57] The card payment went through in the wrong currency.
+60 [8.17 7.36 7.42 7.54 6.95] How can I choose which currency to pay in?
+61 [3.8  3.9  3.85 3.63 3.38] Does my card support Japanese yen?
+62 [-0.53 -0.47  0.49 -0.16  0.22] How much cash may I withdraw overseas?
+63 [-0.8  -1.38 -1.39 -1.53 -1.02] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [0.81 0.63 0.55 1.35 0.57] I was charged the wing amount for an item.
+1 [0.29 0.5  1.08 0.59 0.25] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [ 0.5   0.11 -0.59 -0.37 -0.51] My card payment had the wrong exchange rate
+3 [-0.83 -0.97 -0.69 -0.68 -0.74] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [-0.53  0.06 -0.48 -0.4  -0.49] I withdrew cash and I think the exchange rate is wrong.
+5 [-0.84 -0.65 -0.61 -0.34 -0.69] When I got cash the exchange rate was wrong
+6 [-0.88 -0.43 -0.3  -0.23 -0.13] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [2.7  2.33 2.05 2.37 2.22] Why is the exchange rate on my card wrong?
+8 [-0.05  0.25  0.05  0.45  0.12] I purchased something overseas and the incorrect exchange rate was applied.
+9 [0.59 0.6  0.57 0.68 0.58] The exchange rate was incorrect for this item I bought.
+10 [ 0.01 -0.57 -0.27 -0.14 -0.28] The exchange rate for case abroad is applied wrong.
+11 [2.74 2.88 3.11 3.16 2.56] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [6.44 8.17 6.7  6.63 6.68] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [0.89 1.1  0.89 1.27 1.04] Why was the wrong rate applied when I bought something in a different currency?
+14 [-0.16 -0.44 -0.07  0.03  0.03] There's an error in regards to the exchange rate for an item I bought.
+15 [0.23 0.71 0.84 1.17 0.27] what is the correct exchange rate for getting cash
+16 [ 0.76 -0.11  0.03 -0.25  0.04] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [-0.27 -0.44  0.31 -0.34  0.02] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-1.15 -2.25 -1.02 -1.52 -1.39] What should I do about a direct debit that I did not set up?
+19 [-0.09 -0.06 -0.21  0.06 -0.29] is there a foreign currencies charge?
+20 [4.34 6.17 4.06 4.06 4.17] Why did I not get my refund yet?
+21 [2.25 2.59 1.82 1.8  2.02] I was mistakenly charged a fee for using my card.
+22 [2.65 3.79 1.19 3.43 1.4 ] The ATM charged me an extra fee, Why?
+23 [3.39 3.93 2.98 4.21 2.97] My transaction went through but I was charged a fee. Why?
+24 [2.9  2.04 2.96 2.68 1.84] Will I get charged fees when I add money with an international card?
+25 [-0.81 -0.27 -0.64 -1.26 -0.86] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [-1.54 -1.47 -1.21 -1.02 -1.21] I don't think I made this transaction on my statement
+27 [1.22 0.95 1.15 1.37 1.26] There is a strange charge on my debit statement
+28 [2.65 2.62 1.88 3.84 1.86] Why do i have an extra fee on my statement?
+29 [1.45 0.9  0.13 0.03 0.42] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [2.5  2.43 2.61 3.28 2.32] What is this extra fee while I was doing a transfer?
+31 [2.6  2.8  2.63 2.56 2.71] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,json,csv
+from scorer import *
+S=load('scorer_in.npz');D=np.load('directions.npz');w=D['w'];b=D['b']
+for name in ['probes','evidence']:
+ M=np.load(name+'_M.npz')['M']; z=logits(S,M);x=M@w+b;bonus=np.minimum(3,4*np.maximum(0,x-.3));zz=z+bonus
+ print(name)
+ ts=sum(json.load(open('probes.json')).values(),[]) if name=='probes' else [r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')]
+ for i,t in enumerate(ts):
+  if name=='evidence' or z[i].argmax()"'!=zz[i].argmax():print(i,DEPTS[z[i].argmax()],DEPTS[zz[i].argmax()],t)
+PY' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 567ms:
+probes
+0 disputes fees_fx The exchange rate used for my card purchase was wrong.
+2 disputes fees_fx I paid abroad and the exchange rate was terrible.
+4 disputes fees_fx The amount charged for my purchase is wrong because of the exchange rate.
+6 disputes fees_fx I received less cash than expected due to an incorrect exchange rate.
+7 disputes fees_fx The rate applied to my overseas shopping does not match the market rate.
+8 disputes fees_fx The foreign currency rate on this payment is not right.
+10 disputes fees_fx My purchase was converted from euros to pounds at the wrong rate.
+12 disputes fees_fx The exchange rate on my bank transfer abroad was incorrect.
+14 disputes fees_fx The currency conversion rate looks wrong on this transaction.
+23 fees_fx disputes The charge for my overseas shopping does not match my receipt.
+24 disputes fees_fx The foreign currency payment is not recognised.
+28 disputes transfers_topups The bank transfer abroad went to the incorrect account.
+33 cards disputes I lost my debit card.
+45 cards account_security Can I open an account in my country?
+46 cards account_security I want to change my address.
+48 cards fees_fx How do I exchange euros into pounds?
+49 cards fees_fx What is your exchange rate today?
+52 disputes account_security My card was stolen.
+62 transfers_topups fees_fx How much cash may I withdraw overseas?
+63 cards account_security Can I withdraw foreign cash on holiday?
+evidence
+0 disputes disputes I was charged the wing amount for an item.
+1 disputes fees_fx When I made a cash transfer abroad the wrong exchange rate was applied
+2 disputes fees_fx My card payment had the wrong exchange rate
+3 disputes fees_fx Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 disputes disputes I withdrew cash and I think the exchange rate is wrong.
+5 disputes fees_fx When I got cash the exchange rate was wrong
+6 disputes fees_fx The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 disputes disputes Why is the exchange rate on my card wrong?
+8 disputes fees_fx I purchased something overseas and the incorrect exchange rate was applied.
+9 disputes disputes The exchange rate was incorrect for this item I bought.
+10 disputes fees_fx The exchange rate for case abroad is applied wrong.
+11 cards fees_fx Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 disputes disputes What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 disputes disputes Why was the wrong rate applied when I bought something in a different currency?
+14 disputes fees_fx There's an error in regards to the exchange rate for an item I bought.
+15 disputes fees_fx what is the correct exchange rate for getting cash
+16 disputes disputes I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 disputes disputes I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 disputes transfers_topups What should I do about a direct debit that I did not set up?
+19 fees_fx fees_fx is there a foreign currencies charge?
+20 disputes disputes Why did I not get my refund yet?
+21 fees_fx fees_fx I was mistakenly charged a fee for using my card.
+22 fees_fx fees_fx The ATM charged me an extra fee, Why?
+23 fees_fx fees_fx My transaction went through but I was charged a fee. Why?
+24 fees_fx fees_fx Will I get charged fees when I add money with an international card?
+25 disputes disputes So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 disputes disputes I don't think I made this transaction on my statement
+27 disputes fees_fx There is a strange charge on my debit statement
+28 fees_fx fees_fx Why do i have an extra fee on my statement?
+29 disputes disputes I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fees_fx fees_fx What is this extra fee while I was doing a transfer?
+31 disputes disputes My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The contrast direction corrects several exchange-rate complaints, but it also changes some unrelated routes. I will add an option gate and limit the correction strength before writing the output file.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_option.py <<'PY'
+exec(open('inspect_probes.py').read().split('# Each direction')[0])
+A=np.load('paired_M.npz')['M'].astype(np.float64)
+basis=[]
+def add(v):
+ v=v.astype(np.float64).copy()
+ for u in basis:v-=u*(v@u)
+ basis.append(v/np.linalg.norm(v))
+add(A.mean((0,1)))
+for j in range(5):add(A[:24,j].mean(0)-A[24:,j].mean(0))
+for i,j in [(36,0),(38,2),(41,4),(50,3),(20,1)]:add(P[i,j]-np.delete(P[i],j,0).mean(0))
+p=A[:,3].mean(0);n=A[:,[0,1,2,4]].mean((0,1));d=p-n
+for u in basis:d-=u*(d@u)
+w=d/(d@(p-n));b=-(n@w)
+np.savez('option.npz',w=w,b=b)
+for label,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print('\\n',label)
+ x=M@w+b
+ for i,t in enumerate(ts): print(i,np.round(x[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_option.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 599ms:
+
+ probes
+0 [-2.23 -0.15  0.34  1.16  0.57] The exchange rate used for my card purchase was wrong.
+1 [-0.77 -0.19  0.44  1.38  0.56] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.94 -0.31  0.49  0.69  0.48] I paid abroad and the exchange rate was terrible.
+3 [-1.44 -0.38  0.63  0.65  0.21] My ATM withdrawal used a bad conversion rate.
+4 [-0.7  -0.03  0.37  0.41  0.33] The amount charged for my purchase is wrong because of the exchange rate.
+5 [-2.24 -0.73  0.11  0.55  0.1 ] Why did you convert my card transaction at such an unfair rate?
+6 [-0.6  -0.04  0.47  0.95  0.47] I received less cash than expected due to an incorrect exchange rate.
+7 [-0.9   0.26  0.56  1.12  0.58] The rate applied to my overseas shopping does not match the market rate.
+8 [-0.12  1.08  1.03  1.92  1.02] The foreign currency rate on this payment is not right.
+9 [-0.89  0.86  0.27  1.04  0.46] I think the exchange rate for the money I took out is mistaken.
+10 [-0.92 -0.03  0.56  1.04  0.55] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.64 -0.67  0.47  1.04  0.47] You applied the wrong conversion rate when I withdrew dollars.
+12 [-0.85 -0.14  0.    1.06  0.49] The exchange rate on my bank transfer abroad was incorrect.
+13 [-0.9  -0.46 -0.23  0.43 -0.14] Why is your exchange rate worse than the interbank rate?
+14 [-0.7  -0.1   0.33  0.96  0.46] The currency conversion rate looks wrong on this transaction.
+15 [-1.08  0.23  0.48 -0.49  0.52] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [-0.98  1.18  0.79  0.96  0.76] The amount charged for my card purchase was wrong.
+17 [-0.86 -0.76  0.23  0.73  0.27] The cash machine gave me the wrong amount of money.
+18 [-1.01 -0.8   0.36  0.87  0.39] I paid abroad and the payment was declined.
+19 [-0.62  0.84  0.49  1.13  0.43] My ATM withdrawal is pending.
+20 [-0.05  0.3   0.37  0.5   0.38] The amount charged for my purchase is wrong because I was charged twice.
+21 [-2.57 -0.69  0.01  0.4  -0.02] Why did you decline my card transaction?
+22 [-0.47 -0.88  0.35  0.83  0.33] I received less cash than requested but the full amount was debited.
+23 [-0.37  0.47  0.39  0.58  0.45] The charge for my overseas shopping does not match my receipt.
+24 [-1.41  0.23  0.76  1.65  0.76] The foreign currency payment is not recognised.
+25 [0.24 0.68 0.68 1.12 0.77] I think the money I took out was deducted twice.
+26 [-0.01  0.78  0.91  1.39  0.8 ] My purchase in euros was reversed but I have no refund.
+27 [-1.88 -1.14 -0.47 -0.09 -0.58] You debited my account but the ATM did not dispense dollars.
+28 [-1.33 -0.24  0.35  1.08  0.01] The bank transfer abroad went to the incorrect account.
+29 [-2.5  -0.5   0.06  0.42 -0.01] Why is my card payment still pending?
+30 [-0.72 -0.54  0.06  1.09  0.56] The recipient account looks wrong on this transaction.
+31 [-1.9  -0.47  0.01 -0.13  0.03] I bought a meal overseas and was overcharged by the restaurant.
+32 [0.28 1.08 1.26 1.7  1.32] How do I order a replacement card?
+33 [-1.82 -0.04  0.44  0.92  0.41] I lost my debit card.
+34 [-1.96 -0.    0.57  0.88  0.09] My contactless payment feature does not work.
+35 [-1.44  0.65  0.76  1.2   0.08] I forgot my card PIN.
+36 [1.54 1.58 1.63 1.78 1.16] How do I activate my new card?
+37 [-0.36  0.8   0.62  1.24  0.71] How can I add my card to Apple Pay?
+38 [-0.82  0.21  0.17  0.79  0.51] Where is my bank transfer?
+39 [-1.12  0.74 -0.29  1.16  0.85] How do I top up my account?
+40 [-1.39 -0.18 -0.37  0.83  0.41] My balance has not updated after my deposit.
+41 [-0.04  0.96  0.79  1.18  0.72] I cannot verify my identity.
+42 [-1.38  0.21  0.29  0.96 -0.2 ] I forgot my app passcode.
+43 [-0.08  1.12  0.76  1.23  1.4 ] Please close my account.
+44 [-2.08  0.16 -0.12  1.29 -0.38] I lost my phone.
+45 [-1.07  0.27  0.01  1.27 -0.04] Can I open an account in my country?
+46 [-1.74  0.26 -0.17  1.   -0.02] I want to change my address.
+47 [-1.86  0.15  0.23  1.16  0.62] What currencies can I hold?
+48 [-0.59  0.53  0.58  0.96  0.65] How do I exchange euros into pounds?
+49 [-0.4   0.38  0.58  1.12  0.58] What is your exchange rate today?
+50 [ 0.09 -0.21  0.5   0.23  0.53] Why was I charged a cash withdrawal fee?
+51 [-0.31  1.1   1.13  0.56  1.15] What is the fee for an international transfer?
+52 [-1.07 -0.16  0.51  1.04 -0.06] My card was stolen.
+53 [-2.21 -0.66  0.14  0.67  0.14] I did not make this card purchase abroad.
+54 [-0.86 -0.48  0.13  0.79  0.08] A cash withdrawal I never made appeared on my account.
+55 [-0.28  0.84  0.87  1.09  0.73] The merchant promised a refund but it has not arrived.
+56 [-1.03 -0.31  0.2   0.66  0.2 ] My direct debit was taken twice.
+57 [-2.23  0.11  0.7   1.03  0.79] I want to cancel a pending card payment.
+58 [-2.65 -0.94 -0.13  0.39 -0.39] The ATM kept my card.
+59 [-1.97 -0.1   0.43  1.21  0.44] The card payment went through in the wrong currency.
+60 [-1.38  0.09  0.13  0.67  0.3 ] How can I choose which currency to pay in?
+61 [-0.7   0.6   0.82  1.62  0.89] Does my card support Japanese yen?
+62 [-0.91  0.64 -0.14  1.28  0.17] How much cash may I withdraw overseas?
+63 [-2.1   0.47  0.44  1.73  0.47] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [-0.6   0.53  0.59  0.56  0.66] I was charged the wing amount for an item.
+1 [-0.75 -0.14 -0.09  1.07  0.65] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [-1.77 -0.01  0.69  1.27  0.7 ] My card payment had the wrong exchange rate
+3 [-0.7  -0.15  0.2   0.87  0.25] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [-0.86 -0.8   0.26  1.09  0.35] I withdrew cash and I think the exchange rate is wrong.
+5 [-0.63  0.1   0.52  1.09  0.56] When I got cash the exchange rate was wrong
+6 [-0.82  0.07  0.21  0.87  0.26] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [-1.66 -0.72 -0.05  0.63 -0.04] Why is the exchange rate on my card wrong?
+8 [-1.25 -0.37  0.27  0.75  0.39] I purchased something overseas and the incorrect exchange rate was applied.
+9 [-1.62 -0.81 -0.35  0.29 -0.28] The exchange rate was incorrect for this item I bought.
+10 [-1.44 -0.01  0.32  1.12  0.42] The exchange rate for case abroad is applied wrong.
+11 [-0.25  0.7   0.73  1.63  1.07] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [-0.74 -2.56 -0.39  0.19 -0.18] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [-0.95 -0.28  0.1   0.62  0.12] Why was the wrong rate applied when I bought something in a different currency?
+14 [-1.12  0.07  0.11  0.92  0.23] There's an error in regards to the exchange rate for an item I bought.
+15 [-0.49  0.09  0.25  0.84  0.33] what is the correct exchange rate for getting cash
+16 [-2.77 -0.36  0.14  0.49  0.05] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [-0.78 -0.54 -0.24  0.46 -0.09] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-2.14  0.04 -0.13  0.9   0.21] What should I do about a direct debit that I did not set up?
+19 [-0.05  0.89  1.15  1.02  1.26] is there a foreign currencies charge?
+20 [-1.11 -2.87 -0.69 -0.34 -0.8 ] Why did I not get my refund yet?
+21 [-0.3   1.05  0.83  0.49  0.89] I was mistakenly charged a fee for using my card.
+22 [-0.24  0.18  0.87  0.81  0.95] The ATM charged me an extra fee, Why?
+23 [-0.11  0.14  0.37  0.61  0.5 ] My transaction went through but I was charged a fee. Why?
+24 [-0.15  1.63  1.47  1.18  1.78] Will I get charged fees when I add money with an international card?
+25 [-0.5   0.61  0.66  1.15  0.88] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [-0.42  0.16  0.61  1.12  0.64] I don't think I made this transaction on my statement
+27 [-1.31 -0.72 -0.1  -0.12 -0.13] There is a strange charge on my debit statement
+28 [ 0.07  0.81  0.84 -0.03  0.92] Why do i have an extra fee on my statement?
+29 [-2.47 -0.7   0.13  0.54  0.17] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [0.05 0.99 1.03 0.82 1.05] What is this extra fee while I was doing a transfer?
+31 [-0.42  0.47  0.49  1.15  0.48] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,json,csv
+from scorer import *
+S=load('scorer_in.npz');D=np.load('directions.npz');O=np.load('option.npz')
+for name in ['probes','evidence']:
+ M=np.load(name+'_M.npz')['M'];z=logits(S,M);x=M@D['w']+D['b'];y=M@O['w']+O['b'];bonus=np.minimum(3,6*np.minimum(np.maximum(0,x-.15),np.maximum(0,y-.5)));zz=z+bonus
+ print(name)
+ ts=sum(json.load(open('probes.json')).values(),[]) if name=='probes' else [r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')]
+ for i,t in enumerate(ts):
+  if name=='evidence' or z[i].argmax()"'!=zz[i].argmax():print(i,DEPTS[z[i].argmax()],DEPTS[zz[i].argmax()],t)
+PY' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 557ms:
+probes
+0 disputes fees_fx The exchange rate used for my card purchase was wrong.
+1 disputes fees_fx The currency conversion on my cash withdrawal is incorrect.
+2 disputes fees_fx I paid abroad and the exchange rate was terrible.
+6 disputes fees_fx I received less cash than expected due to an incorrect exchange rate.
+7 disputes fees_fx The rate applied to my overseas shopping does not match the market rate.
+10 disputes fees_fx My purchase was converted from euros to pounds at the wrong rate.
+12 disputes fees_fx The exchange rate on my bank transfer abroad was incorrect.
+14 disputes fees_fx The currency conversion rate looks wrong on this transaction.
+24 disputes fees_fx The foreign currency payment is not recognised.
+32 cards disputes How do I order a replacement card?
+48 cards fees_fx How do I exchange euros into pounds?
+49 cards fees_fx What is your exchange rate today?
+59 disputes fees_fx The card payment went through in the wrong currency.
+61 cards fees_fx Does my card support Japanese yen?
+62 transfers_topups fees_fx How much cash may I withdraw overseas?
+evidence
+0 disputes disputes I was charged the wing amount for an item.
+1 disputes fees_fx When I made a cash transfer abroad the wrong exchange rate was applied
+2 disputes fees_fx My card payment had the wrong exchange rate
+3 disputes fees_fx Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 disputes fees_fx I withdrew cash and I think the exchange rate is wrong.
+5 disputes fees_fx When I got cash the exchange rate was wrong
+6 disputes fees_fx The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 disputes fees_fx Why is the exchange rate on my card wrong?
+8 disputes fees_fx I purchased something overseas and the incorrect exchange rate was applied.
+9 disputes disputes The exchange rate was incorrect for this item I bought.
+10 disputes fees_fx The exchange rate for case abroad is applied wrong.
+11 cards fees_fx Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 disputes disputes What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 disputes disputes Why was the wrong rate applied when I bought something in a different currency?
+14 disputes fees_fx There's an error in regards to the exchange rate for an item I bought.
+15 disputes fees_fx what is the correct exchange rate for getting cash
+16 disputes disputes I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 disputes disputes I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 disputes disputes What should I do about a direct debit that I did not set up?
+19 fees_fx fees_fx is there a foreign currencies charge?
+20 disputes disputes Why did I not get my refund yet?
+21 fees_fx fees_fx I was mistakenly charged a fee for using my card.
+22 fees_fx fees_fx The ATM charged me an extra fee, Why?
+23 fees_fx fees_fx My transaction went through but I was charged a fee. Why?
+24 fees_fx fees_fx Will I get charged fees when I add money with an international card?
+25 disputes disputes So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 disputes disputes I don't think I made this transaction on my statement
+27 disputes disputes There is a strange charge on my debit statement
+28 fees_fx fees_fx Why do i have an extra fee on my statement?
+29 disputes disputes I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fees_fx fees_fx What is this extra fee while I was doing a transfer?
+31 disputes disputes My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "python3 - <<'PY'
+s=open('inspect_option.py').read().replace('A[:,[0,1,2,4]].mean((0,1))','A[:,[2,4]].mean((0,1))')
+open('inspect_option_close.py','w').write(s)
+PY
+<lab>/.venv/bin/python inspect_option_close.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 870ms:
+
+ probes
+0 [-1.4   0.32 -0.28  0.95 -0.32] The exchange rate used for my card purchase was wrong.
+1 [-0.69  0.33 -0.23  0.85 -0.09] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.93  0.19 -0.33  0.93 -0.41] I paid abroad and the exchange rate was terrible.
+3 [-0.99  0.17 -0.07  0.36 -0.39] My ATM withdrawal used a bad conversion rate.
+4 [-0.82  0.41 -0.47  0.65 -0.3 ] The amount charged for my purchase is wrong because of the exchange rate.
+5 [-1.07  0.75 -0.03  0.79 -0.11] Why did you convert my card transaction at such an unfair rate?
+6 [-0.74  0.72 -0.16  0.7  -0.15] I received less cash than expected due to an incorrect exchange rate.
+7 [-0.89  0.38 -0.22  0.8  -0.34] The rate applied to my overseas shopping does not match the market rate.
+8 [0.35 1.44 0.83 1.91 0.95] The foreign currency rate on this payment is not right.
+9 [-0.31  1.44  0.09  1.11  0.43] I think the exchange rate for the money I took out is mistaken.
+10 [-0.96  0.64 -0.16  0.93 -0.27] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.75  0.34 -0.25  0.66 -0.29] You applied the wrong conversion rate when I withdrew dollars.
+12 [-0.8   0.56 -0.13  0.73 -0.31] The exchange rate on my bank transfer abroad was incorrect.
+13 [-0.99 -0.44 -0.38  0.21 -0.37] Why is your exchange rate worse than the interbank rate?
+14 [-0.68  0.68 -0.21  0.93 -0.36] The currency conversion rate looks wrong on this transaction.
+15 [-0.72  0.52 -0.19  0.81 -0.17] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [-0.66  0.91  0.39  1.14  0.36] The amount charged for my card purchase was wrong.
+17 [-0.83  0.44 -0.29  0.81 -0.26] The cash machine gave me the wrong amount of money.
+18 [-0.82  0.53 -0.37  0.48 -0.29] I paid abroad and the payment was declined.
+19 [-0.26  1.35  0.01  0.87  0.17] My ATM withdrawal is pending.
+20 [1.24 1.34 1.48 1.23 1.4 ] The amount charged for my purchase is wrong because I was charged twice.
+21 [-1.21  0.29 -0.64  0.24 -0.55] Why did you decline my card transaction?
+22 [-0.36  0.29 -0.1   0.82 -0.03] I received less cash than requested but the full amount was debited.
+23 [-0.01  0.91  0.56  1.46  0.52] The charge for my overseas shopping does not match my receipt.
+24 [-0.82  0.52  0.01  1.2   0.07] The foreign currency payment is not recognised.
+25 [0.54 0.84 0.27 1.14 0.48] I think the money I took out was deducted twice.
+26 [0.91 2.13 1.21 1.96 1.58] My purchase in euros was reversed but I have no refund.
+27 [-1.39  0.02 -1.08 -0.42 -1.  ] You debited my account but the ATM did not dispense dollars.
+28 [-1.07  0.46  0.16  0.7  -0.26] The bank transfer abroad went to the incorrect account.
+29 [-1.23 -0.05 -0.68  0.05 -0.84] Why is my card payment still pending?
+30 [-0.73  0.3  -0.29  0.69 -0.22] The recipient account looks wrong on this transaction.
+31 [-1.08  0.42 -0.53  0.73 -0.55] I bought a meal overseas and was overcharged by the restaurant.
+32 [0.71 0.89 0.75 1.62 0.73] How do I order a replacement card?
+33 [-0.64  0.49 -0.04  0.68  0.03] I lost my debit card.
+34 [-1.17  0.5  -0.26  0.38 -0.29] My contactless payment feature does not work.
+35 [-0.88  0.43  0.06  1.12 -0.1 ] I forgot my card PIN.
+36 [1.28 1.29 1.07 1.92 0.83] How do I activate my new card?
+37 [-0.36  0.26  0.    0.85 -0.06] How can I add my card to Apple Pay?
+38 [-0.57  0.25  0.15  1.06 -0.16] Where is my bank transfer?
+39 [-0.81  0.37  0.44  1.    0.08] How do I top up my account?
+40 [0.47 1.4  1.13 2.39 1.35] My balance has not updated after my deposit.
+41 [-0.09  1.    0.38  1.65  0.73] I cannot verify my identity.
+42 [-1.04  0.21 -0.49  0.38  0.12] I forgot my app passcode.
+43 [0.21 1.36 0.6  1.19 1.41] Please close my account.
+44 [-1.29  0.24 -0.46  0.75 -0.52] I lost my phone.
+45 [-0.66  0.26 -0.24  0.81 -0.19] Can I open an account in my country?
+46 [-1.26 -0.02 -0.55  0.4  -0.44] I want to change my address.
+47 [-0.12  0.84  0.74  1.64  0.76] What currencies can I hold?
+48 [-0.51  0.33  0.14  0.94 -0.15] How do I exchange euros into pounds?
+49 [-0.61  0.02 -0.2   0.71 -0.32] What is your exchange rate today?
+50 [1.34 0.9  1.43 1.3  1.53] Why was I charged a cash withdrawal fee?
+51 [0.37 1.27 1.03 1.41 1.1 ] What is the fee for an international transfer?
+52 [-0.2   0.63  0.33  1.74  0.29] My card was stolen.
+53 [-1.34 -0.06 -0.63  0.2  -0.5 ] I did not make this card purchase abroad.
+54 [-0.65  0.18 -0.07  0.68 -0.12] A cash withdrawal I never made appeared on my account.
+55 [0.37 1.82 0.76 1.71 1.03] The merchant promised a refund but it has not arrived.
+56 [-0.83  0.6  -0.45  0.32 -0.36] My direct debit was taken twice.
+57 [-1.47  0.22 -0.29  0.78 -0.2 ] I want to cancel a pending card payment.
+58 [-1.3  -0.03 -0.41  0.23 -0.43] The ATM kept my card.
+59 [-1.25  0.56 -0.38  0.69 -0.29] The card payment went through in the wrong currency.
+60 [0.17 1.3  1.1  1.75 1.43] How can I choose which currency to pay in?
+61 [0.67 1.41 1.24 2.15 1.34] Does my card support Japanese yen?
+62 [-0.05  0.9   0.33  1.48  0.39] How much cash may I withdraw overseas?
+63 [-1.15  0.41 -0.11  1.38  0.21] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [-0.15  1.27  0.07  0.9   0.11] I was charged the wing amount for an item.
+1 [-0.37  0.94  0.19  1.09  0.16] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [-0.91  0.78 -0.07  0.93 -0.03] My card payment had the wrong exchange rate
+3 [-0.92 -0.2  -0.51  0.7  -0.39] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [-0.91  0.19 -0.41  0.69 -0.41] I withdrew cash and I think the exchange rate is wrong.
+5 [-0.77  0.57 -0.14  0.83 -0.32] When I got cash the exchange rate was wrong
+6 [-1.    0.2  -0.63  0.59 -0.58] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [-1.33 -0.37 -0.16  0.27 -0.21] Why is the exchange rate on my card wrong?
+8 [-0.84  0.68 -0.22  0.89 -0.09] I purchased something overseas and the incorrect exchange rate was applied.
+9 [-1.62 -0.07 -1.09 -0.01 -0.97] The exchange rate was incorrect for this item I bought.
+10 [-0.69  0.65  0.19  1.19  0.18] The exchange rate for case abroad is applied wrong.
+11 [0.37 1.22 0.96 2.05 0.94] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [-0.21 -1.08 -0.11  0.76  0.35] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [-0.93  0.45 -0.45  0.6  -0.52] Why was the wrong rate applied when I bought something in a different currency?
+14 [-1.17  0.01 -0.71  0.52 -0.63] There's an error in regards to the exchange rate for an item I bought.
+15 [-0.46  0.2  -0.01  0.92 -0.47] what is the correct exchange rate for getting cash
+16 [-1.28  0.13 -0.64  0.2  -0.64] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [-0.9   0.07 -0.56  0.15 -0.65] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-1.58 -0.11 -0.56  0.31 -0.49] What should I do about a direct debit that I did not set up?
+19 [0.15 0.93 0.64 1.18 0.69] is there a foreign currencies charge?
+20 [-0.16 -1.29  0.16  0.98 -0.09] Why did I not get my refund yet?
+21 [0.16 1.81 1.29 1.07 1.17] I was mistakenly charged a fee for using my card.
+22 [0.76 1.21 2.02 1.78 2.04] The ATM charged me an extra fee, Why?
+23 [0.8  1.11 1.21 1.66 1.45] My transaction went through but I was charged a fee. Why?
+24 [0.83 1.83 2.01 1.88 1.68] Will I get charged fees when I add money with an international card?
+25 [0.08 1.11 0.72 1.65 0.79] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [-0.14  0.34  0.29  1.11  0.42] I don't think I made this transaction on my statement
+27 [-1.26  0.46 -0.77  0.21 -0.77] There is a strange charge on my debit statement
+28 [0.8  1.26 1.81 1.3  1.79] Why do i have an extra fee on my statement?
+29 [-1.24  0.51 -0.41  0.53 -0.45] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [0.59 1.4  1.06 1.61 1.42] What is this extra fee while I was doing a transfer?
+31 [-0.04  1.85  0.36  1.26  0.26] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python embed.py neutral_M.npz 'Hello there.' 'Thank you for your help.' 'Can you help me please?' 'I have a question.' 'Good morning, how are you?' 'I would like to speak to someone.' 'What is the weather like today?' 'Tell me a story about a forest.' 'My favourite colour is blue.' 'I am going for a walk.' 'Could you explain that again?' 'That is all I needed, goodbye.'" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 22899ms:
+W1104 11:22:43.597000 62859 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote neutral_M.npz 12 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "python3 - <<'PY'
+s=open('inspect_option.py').read().replace(\"p=A[:,3].mean(0);n=A[:,[0,1,2,4]].mean((0,1));d=p-n\", \"N=np.load('neutral_M.npz')['M']\\np=N[:,3].mean(0);n=N[:,[0,1,2,4]].mean((0,1));d=p-n\")
+open('inspect_option_neutral.py','w').write(s)
+PY
+<lab>/.venv/bin/python inspect_option_neutral.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 539ms:
+
+ probes
+0 [-0.46  0.09  0.62  0.84  0.8 ] The exchange rate used for my card purchase was wrong.
+1 [ 0.17 -0.31  0.65  1.    0.7 ] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.08 -0.35  0.43  0.12  0.6 ] I paid abroad and the exchange rate was terrible.
+3 [-0.38 -0.29  0.51  0.41  0.23] My ATM withdrawal used a bad conversion rate.
+4 [0.3  0.18 0.86 0.22 0.78] The amount charged for my purchase is wrong because of the exchange rate.
+5 [-0.16 -0.08  0.74  0.82  0.8 ] Why did you convert my card transaction at such an unfair rate?
+6 [0.48 0.11 0.96 1.02 0.94] I received less cash than expected due to an incorrect exchange rate.
+7 [-0.06  0.14  0.68  0.6   0.9 ] The rate applied to my overseas shopping does not match the market rate.
+8 [0.45 0.75 0.9  1.27 0.88] The foreign currency rate on this payment is not right.
+9 [0.24 0.44 0.78 1.1  0.86] I think the exchange rate for the money I took out is mistaken.
+10 [0.16 0.11 0.77 0.81 0.86] My purchase was converted from euros to pounds at the wrong rate.
+11 [0.39 0.29 0.76 0.95 0.78] You applied the wrong conversion rate when I withdrew dollars.
+12 [0.31 0.09 0.56 1.13 0.95] The exchange rate on my bank transfer abroad was incorrect.
+13 [0.1  0.22 0.22 0.69 0.25] Why is your exchange rate worse than the interbank rate?
+14 [0.31 0.14 0.75 0.95 0.91] The currency conversion rate looks wrong on this transaction.
+15 [0.13 0.46 0.83 0.32 0.88] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [0.23 1.01 0.84 0.83 0.83] The amount charged for my card purchase was wrong.
+17 [0.38 0.38 0.75 0.74 0.75] The cash machine gave me the wrong amount of money.
+18 [0.35 0.36 0.9  1.04 0.89] I paid abroad and the payment was declined.
+19 [0.55 0.74 0.93 1.18 0.87] My ATM withdrawal is pending.
+20 [0.1  0.24 0.08 0.61 0.18] The amount charged for my purchase is wrong because I was charged twice.
+21 [-1.   -0.14  0.67  0.65  0.61] Why did you decline my card transaction?
+22 [0.64 0.19 0.96 1.01 0.91] I received less cash than requested but the full amount was debited.
+23 [0.68 0.79 0.66 0.81 0.76] The charge for my overseas shopping does not match my receipt.
+24 [-0.47 -0.31  0.73  0.75  0.43] The foreign currency payment is not recognised.
+25 [0.83 0.8  0.98 1.04 0.97] I think the money I took out was deducted twice.
+26 [0.77 0.62 1.09 1.2  0.87] My purchase in euros was reversed but I have no refund.
+27 [ 0.05 -0.07  0.72  0.79  0.63] You debited my account but the ATM did not dispense dollars.
+28 [0.11 0.26 0.69 1.23 0.68] The bank transfer abroad went to the incorrect account.
+29 [-0.77 -0.22  0.55  0.6   0.61] Why is my card payment still pending?
+30 [0.33 0.36 0.56 1.14 0.9 ] The recipient account looks wrong on this transaction.
+31 [-0.07  0.11  0.79  0.12  0.79] I bought a meal overseas and was overcharged by the restaurant.
+32 [0.34 0.81 1.02 1.31 1.03] How do I order a replacement card?
+33 [-0.47  0.26  0.86  1.09  0.73] I lost my debit card.
+34 [-0.61 -0.1   0.65  0.87  0.36] My contactless payment feature does not work.
+35 [-1.05  0.16  0.43  0.69 -0.21] I forgot my card PIN.
+36 [0.88 0.99 0.99 0.86 0.69] How do I activate my new card?
+37 [-0.12  0.83  0.59  1.16  0.71] How can I add my card to Apple Pay?
+38 [0.06 0.39 0.44 0.63 0.69] Where is my bank transfer?
+39 [-0.15  0.68  0.34  1.    0.92] How do I top up my account?
+40 [0.11 0.52 0.45 0.53 0.69] My balance has not updated after my deposit.
+41 [0.43 0.67 0.75 0.71 0.64] I cannot verify my identity.
+42 [-0.13  0.45  0.55  1.08  0.31] I forgot my app passcode.
+43 [0.83 1.13 1.1  1.29 1.05] Please close my account.
+44 [-0.9  -0.18  0.07  0.71 -0.1 ] I lost my phone.
+45 [-0.01  0.63  0.47  1.12  0.47] Can I open an account in my country?
+46 [-0.62  0.19  0.31  0.99  0.12] I want to change my address.
+47 [-0.65  0.29  0.31  0.71  0.56] What currencies can I hold?
+48 [0.3  0.71 0.72 0.87 0.85] How do I exchange euros into pounds?
+49 [-0.12  0.19  0.39  0.67  0.82] What is your exchange rate today?
+50 [0.13 0.38 0.22 0.24 0.22] Why was I charged a cash withdrawal fee?
+51 [0.38 0.85 0.88 0.33 1.07] What is the fee for an international transfer?
+52 [0.29 0.49 0.92 0.91 0.52] My card was stolen.
+53 [-0.49 -0.04  0.75  1.08  0.69] I did not make this card purchase abroad.
+54 [ 0.47 -0.16  0.61  1.15  0.69] A cash withdrawal I never made appeared on my account.
+55 [0.43 0.36 1.02 0.89 0.82] The merchant promised a refund but it has not arrived.
+56 [0.46 0.42 0.9  1.03 0.86] My direct debit was taken twice.
+57 [-0.97 -0.16  0.49  0.61  0.44] I want to cancel a pending card payment.
+58 [-0.74 -0.31  0.58  0.87  0.23] The ATM kept my card.
+59 [-0.26 -0.14  0.96  1.25  0.91] The card payment went through in the wrong currency.
+60 [-0.02  0.46  0.47  0.74  0.32] How can I choose which currency to pay in?
+61 [0.15 0.77 0.9  1.3  0.96] Does my card support Japanese yen?
+62 [-0.38  0.38  0.11  0.67  0.22] How much cash may I withdraw overseas?
+63 [-1.13  0.39  0.33  1.04  0.26] Can I withdraw foreign cash on holiday?
+
+ evidence
+0 [0.42 0.46 0.92 0.75 0.95] I was charged the wing amount for an item.
+1 [0.41 0.09 0.55 1.06 0.94] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [-0.23  0.28  0.99  1.1   0.95] My card payment had the wrong exchange rate
+3 [-0.01 -0.03  0.41  0.5   0.38] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [0.48 0.22 0.93 1.28 1.01] I withdrew cash and I think the exchange rate is wrong.
+5 [ 0.38 -0.1   0.78  0.97  0.94] When I got cash the exchange rate was wrong
+6 [0.2  0.3  0.7  0.79 0.8 ] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [-0.29 -0.02  0.15  0.73  0.22] Why is the exchange rate on my card wrong?
+8 [0.16 0.03 0.86 0.97 0.91] I purchased something overseas and the incorrect exchange rate was applied.
+9 [ 0.11 -0.02  0.6   0.84  0.6 ] The exchange rate was incorrect for this item I bought.
+10 [0.07 0.19 0.81 1.16 0.84] The exchange rate for case abroad is applied wrong.
+11 [0.43 0.76 0.78 1.33 1.14] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [-0.26 -0.73 -0.12  0.09 -0.24] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [0.4  0.25 0.75 0.9  0.79] Why was the wrong rate applied when I bought something in a different currency?
+14 [0.15 0.39 0.69 0.97 0.81] There's an error in regards to the exchange rate for an item I bought.
+15 [0.48 0.65 0.76 1.03 0.95] what is the correct exchange rate for getting cash
+16 [-0.87 -0.14  0.67  0.65  0.59] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [0.61 0.06 0.74 0.92 0.79] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-0.62 -0.23  0.43  0.97  0.64] What should I do about a direct debit that I did not set up?
+19 [0.39 0.69 0.91 0.82 1.03] is there a foreign currencies charge?
+20 [-0.56 -0.74 -0.53 -0.66 -0.46] Why did I not get my refund yet?
+21 [0.4  0.71 0.61 0.42 0.73] I was mistakenly charged a fee for using my card.
+22 [0.34 0.53 0.18 0.35 0.29] The ATM charged me an extra fee, Why?
+23 [0.41 0.54 0.25 0.09 0.26] My transaction went through but I was charged a fee. Why?
+24 [0.39 1.01 0.58 0.41 1.19] Will I get charged fees when I add money with an international card?
+25 [-0.41 -0.01 -0.03  0.31  0.34] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [-0.19 -0.23  0.44  0.82  0.36] I don't think I made this transaction on my statement
+27 [ 0.34 -0.1   0.73  0.56  0.71] There is a strange charge on my debit statement
+28 [ 0.54  0.79  0.43 -0.03  0.5 ] Why do i have an extra fee on my statement?
+29 [-0.55  0.22  0.65  0.66  0.75] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [0.57 0.8  0.9  0.33 0.94] What is this extra fee while I was doing a transfer?
+31 [0.61 0.47 0.93 1.17 0.93] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_multiaxis.py <<'PY'
+exec(open('inspect_pair_direction.py').read().split('d=A[:24,3]')[0])
+groups=[[0,1,6,7,10,11,18,19,20,21],[2,3,8,9,12,13,16,17,22,23],[4,5,14,15]]
+ws=[];bs=[]
+for g in groups:
+ p=A[g,3].mean(0);n=A[np.array(g)+24,3].mean(0);d=p-n
+ for u in basis:d-=u*(d@u)
+ w=d/(d@(p-n));b=-(n@w);ws.append(w);bs.append(b)
+np.savez('multi.npz',w=np.array(ws).T,b=np.array(bs))
+O=np.load('option.npz');S=load('scorer_in.npz')
+for name,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ x=(M@np.array(ws).T+bs).max(-1);y=M@O['w']+O['b'];z=logits(S,M)
+ bonus=np.minimum(3,6*np.minimum(np.maximum(0,x-.15),np.maximum(0,y-.5)));zz=z+bonus
+ print(name)
+ for i,t in enumerate(ts):
+  if name=='evidence' or z[i].argmax()"'!=zz[i].argmax():print(i,DEPTS[z[i].argmax()],DEPTS[zz[i].argmax()],np.round(x[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_option.py > /tmp/laya-option-check.txt
+<lab>/.venv/bin/python inspect_multiaxis.py' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 1381ms:
+probes
+0 disputes fees_fx [0.88 1.01 0.41 1.05 0.49] The exchange rate used for my card purchase was wrong.
+1 disputes fees_fx [0.39 1.24 0.43 1.03 0.4 ] The currency conversion on my cash withdrawal is incorrect.
+2 disputes fees_fx [0.97 1.48 1.15 2.32 0.85] I paid abroad and the exchange rate was terrible.
+6 disputes fees_fx [0.82 0.8  0.83 1.14 0.84] I received less cash than expected due to an incorrect exchange rate.
+7 disputes fees_fx [0.85 1.21 0.79 1.65 0.52] The rate applied to my overseas shopping does not match the market rate.
+10 disputes fees_fx [0.33 0.9  0.38 0.94 0.31] My purchase was converted from euros to pounds at the wrong rate.
+12 disputes fees_fx [0.87 0.82 1.32 1.28 0.73] The exchange rate on my bank transfer abroad was incorrect.
+14 disputes fees_fx [0.49 0.95 0.6  1.17 0.36] The currency conversion rate looks wrong on this transaction.
+24 disputes fees_fx [1.05 1.83 0.77 1.94 1.4 ] The foreign currency payment is not recognised.
+28 disputes fees_fx [1.07 0.94 1.59 0.77 1.52] The bank transfer abroad went to the incorrect account.
+32 cards disputes [1.02 0.76 0.67 0.32 0.66] How do I order a replacement card?
+33 cards fees_fx [1.04 1.42 0.95 0.72 1.04] I lost my debit card.
+34 disputes fees_fx [0.76 0.86 0.78 0.51 0.71] My contactless payment feature does not work.
+35 account_security fees_fx [1.74 1.54 1.1  0.78 1.67] I forgot my card PIN.
+37 cards disputes [0.86 0.63 0.98 0.37 0.85] How can I add my card to Apple Pay?
+44 disputes fees_fx [1.   1.27 1.22 1.27 1.14] I lost my phone.
+45 cards fees_fx [0.85 0.72 0.62 0.53 0.98] Can I open an account in my country?
+46 cards fees_fx [0.89 1.06 0.62 0.57 1.01] I want to change my address.
+47 cards fees_fx [0.55 0.8  0.99 1.   0.85] What currencies can I hold?
+48 cards fees_fx [0.78 0.4  0.72 0.99 0.39] How do I exchange euros into pounds?
+49 cards fees_fx [1.51 1.33 1.33 1.5  0.66] What is your exchange rate today?
+52 disputes fees_fx [1.15 1.09 0.67 0.62 1.11] My card was stolen.
+57 disputes fees_fx [0.66 1.2  1.09 0.71 1.24] I want to cancel a pending card payment.
+59 disputes fees_fx [1.15 0.63 0.74 0.79 0.8 ] The card payment went through in the wrong currency.
+60 cards fees_fx [0.42 0.12 0.29 0.47 0.71] How can I choose which currency to pay in?
+61 cards fees_fx [0.95 0.53 0.64 0.74 0.7 ] Does my card support Japanese yen?
+62 transfers_topups fees_fx [1.25 1.11 1.03 1.52 1.12] How much cash may I withdraw overseas?
+63 cards fees_fx [1.37 1.12 1.35 1.13 1.44] Can I withdraw foreign cash on holiday?
+evidence
+0 disputes disputes [0.89 1.25 0.6  1.24 0.44] I was charged the wing amount for an item.
+1 disputes fees_fx [1.27 1.04 1.6  1.3  1.  ] When I made a cash transfer abroad the wrong exchange rate was applied
+2 disputes fees_fx [1.41 0.93 0.48 0.88 0.52] My card payment had the wrong exchange rate
+3 disputes fees_fx [1.05 1.07 0.57 1.6  0.68] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 disputes fees_fx [1.11 1.3  1.06 1.27 1.04] I withdrew cash and I think the exchange rate is wrong.
+5 disputes fees_fx [0.72 0.82 0.66 1.02 0.4 ] When I got cash the exchange rate was wrong
+6 disputes fees_fx [0.32 0.43 0.27 0.81 0.27] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 disputes fees_fx [0.57 0.5  0.23 0.81 0.31] Why is the exchange rate on my card wrong?
+8 disputes fees_fx [1.1  0.92 1.04 1.62 1.06] I purchased something overseas and the incorrect exchange rate was applied.
+9 disputes disputes [0.75 0.81 0.8  0.83 0.87] The exchange rate was incorrect for this item I bought.
+10 disputes fees_fx [1.64 1.22 1.61 1.89 1.58] The exchange rate for case abroad is applied wrong.
+11 cards fees_fx [0.64 0.47 0.73 0.99 1.01] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 disputes disputes [ 0.74 -0.13  0.61  0.76  0.81] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 disputes disputes [0.65 0.98 0.73 0.97 0.8 ] Why was the wrong rate applied when I bought something in a different currency?
+14 disputes fees_fx [0.47 0.59 0.47 0.73 0.52] There's an error in regards to the exchange rate for an item I bought.
+15 disputes fees_fx [0.88 0.86 1.09 1.27 0.87] what is the correct exchange rate for getting cash
+16 disputes disputes [0.11 1.16 0.41 0.61 0.45] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 disputes disputes [1.18 0.35 1.48 1.05 1.28] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 disputes disputes [0.46 1.19 0.84 0.34 0.7 ] What should I do about a direct debit that I did not set up?
+19 fees_fx fees_fx [0.58 0.52 0.48 1.49 0.49] is there a foreign currencies charge?
+20 disputes disputes [1.74 0.42 1.71 1.84 1.56] Why did I not get my refund yet?
+21 fees_fx fees_fx [0.6  1.13 0.09 0.75 0.19] I was mistakenly charged a fee for using my card.
+22 fees_fx fees_fx [0.59 0.5  0.55 0.44 0.56] The ATM charged me an extra fee, Why?
+23 fees_fx fees_fx [ 0.82  0.95  1.02 -0.04  1.12] My transaction went through but I was charged a fee. Why?
+24 fees_fx fees_fx [1.06 0.92 1.56 0.93 0.85] Will I get charged fees when I add money with an international card?
+25 disputes fees_fx [2.16 2.15 2.25 1.16 1.4 ] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 disputes fees_fx [1.72 1.77 1.34 0.9  1.42] I don't think I made this transaction on my statement
+27 disputes disputes [0.94 0.66 0.76 1.49 0.77] There is a strange charge on my debit statement
+28 fees_fx fees_fx [0.34 0.43 0.5  0.1  0.59] Why do i have an extra fee on my statement?
+29 disputes disputes [0.77 0.55 0.85 0.99 0.79] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 fees_fx fees_fx [0.67 0.47 0.63 0.12 0.76] What is this extra fee while I was doing a transfer?
+31 disputes fees_fx [0.72 0.66 0.9  0.91 0.94] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from scorer import *
+import numpy as np
+z=logits(load('scorer_in.npz'),np.load('probes_M.npz')['M'])
+for i in [24,32,48,49,59,61,62]:print(i,z[i])
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 623ms:
+24 [-0.24109355  0.40919274 -1.0960966  -0.77943504 -0.84466946]
+32 [ 0.5339484 -0.7171637 -1.0762054 -1.8067057 -1.2043178]
+48 [-0.5598112 -1.0792341 -0.9569094 -0.8196691 -1.9678967]
+49 [-0.5309582  -0.70581996 -0.8825417  -0.9065813  -1.4933271 ]
+59 [-0.2568585  0.5854528 -1.3314497 -1.3464454 -1.2106804]
+61 [-0.24251121 -0.968071   -1.2067044  -1.6609428  -2.1862922 ]
+62 [-0.5103759  -0.97469044 -0.489347   -0.8939713  -0.61525935]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > make_scorer.py <<'PY'
+\"\"\"Hand-derived contrast correction. No optimizer, fitted solver, or evidence labels.
+
+The finite projection steps remove explicitly selected background, non-target
+option, and generic relevance directions. All source vectors are from messages
+written in build_probes.py and paired_probes.py.
+\"\"\"
+import numpy as np
+from scorer import load, save
+P = np.load('probes_M.npz')['M'].astype(np.float64)
+A = np.load('paired_M.npz')['M'].astype(np.float64)
+
+def perpendicular(vector, basis):
+    result = vector.copy()
+    for axis in basis:
+        result -= axis * np.dot(result, axis)
+    return result
+
+def add_axis(basis, vector):
+    residual = perpendicular(vector, basis)
+    basis.append(residual / np.linalg.norm(residual))
+
+# Exchange-rate correction: remove average background and the same phrase
+# contrasts at each of the four non-target options. Remove ordinary fee
+# relevance so that this correction does not reweight standard fee questions.
+background = []
+for option in [0, 1, 2, 4]:
+    add_axis(background, A[:, option].mean(0))
+    add_axis(background, A[:24, option].mean(0) - A[24:, option].mean(0))
+add_axis(background, A[24:, 3].mean(0))
+add_axis(background, P[50:52, 3].mean(0) - P[32:47, 3].mean(0))
+pos = A[:24, 3].mean(0)
+neg = A[24:, 3].mean(0)
+d = perpendicular(pos - neg, background)
+fx_w = d / np.dot(d, pos - neg)
+fx_b = -np.dot(neg, fx_w)
+
+# Option gate: remove phrase contrasts and general matching-option signals
+# before contrasting fees_fx with the other departments.
+background = []
+add_axis(background, A.mean((0, 1)))
+for option in range(5):
+    add_axis(background, A[:24, option].mean(0) - A[24:, option].mean(0))
+for row, option in [(36, 0), (38, 2), (41, 4), (50, 3), (20, 1)]:
+    add_axis(background, P[row, option] - np.delete(P[row], option, axis=0).mean(0))
+pos = A[:, 3].mean(0)
+neg = A[:, [0, 1, 2, 4]].mean((0, 1))
+d = perpendicular(pos - neg, background)
+option_w = d / np.dot(d, pos - neg)
+option_b = -np.dot(neg, option_w)
+
+# Fixed design constants: semantic evidence above 0.15, option score above
+# its midpoint 0.5, slope 6, and a maximum correction of 3 logit units.
+# Four affine/ReLU layers implement min(relu(a), relu(b), 3).
+S = load('scorer_in.npz')
+S['extra_W0'] = np.stack([6 * fx_w, 6 * option_w], axis=1).astype(np.float32)
+S['extra_b0'] = np.array([6 * (fx_b - .15), 6 * (option_b - .5)], np.float32)
+S['extra_W1'] = np.array([[1, 1], [0, -1]], np.float32)
+S['extra_b1'] = np.zeros(2, np.float32)
+S['extra_W2'] = np.array([[1, 1], [-1, -1]], np.float32)
+S['extra_b2'] = np.array([0, -3], np.float32)
+S['extra_W3'] = np.array([[1], [-1]], np.float32)
+S['extra_b3'] = np.zeros(1, np.float32)
+save(S, 'scorer_out.npz')
+PY
+<lab>/.venv/bin/python make_scorer.py
+<lab>/.venv/bin/python - <<'PY'
+import csv,json,numpy as np
+from scorer import *
+S=load('scorer_in.npz');T=load('scorer_out.npz')
+assert all(np.array_equal(S[k],T[k]) for k in S)
+assert all(np.isfinite(v).all() for v in T.values())
+M=np.load('evidence_M.npz')['M'];rows=list(csv.DictReader(open('evidence.csv'),delimiter='\\t'));a=predict(S,M);b=predict(T,M)
+print('Evidence:',sum(y==r['correct'] for y,r in zip(b,rows)),'/ 32')
+print('Evidence controls unchanged:',sum(a[i]==b[i] for i in range(16,32)),'/ 16')
+print('Unresolved:',[i for i,r in enumerate(rows) if b[i]"'!=r['"'correct']])
+P=np.load('probes_M.npz')['M'];a=predict(S,P);b=predict(T,P)
+print('Authored correction probes:',sum(y=='fees_fx' for y in b[:16]),'/ 16')
+print('Authored controls unchanged:',sum(x==y for x,y in zip(a[16:],b[16:])),'/ 48')
+print('Base arrays unchanged; all output weights finite.')
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 1421ms:
+Evidence: 28 / 32
+Evidence controls unchanged: 16 / 16
+Unresolved: [0, 9, 12, 13]
+Authored correction probes: 9 / 16
+Authored controls unchanged: 41 / 48
+Base arrays unchanged; all output weights finite.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_pair_gates.py <<'PY'
+exec(open('inspect_option.py').read().split('p=A[:,3]')[0])
+ws=[];bs=[]
+for j in [0,1,2,4]:
+ p=A[:,3].mean(0);n=A[:,j].mean(0);d=p-n
+ for u in basis:d-=u*(d@u)
+ w=d/(d@(p-n));b=-(n@w);ws.append(w);bs.append(b)
+G=np.array(ws).T;B=np.array(bs)
+np.savez('gates.npz',w=G,b=B)
+for name,M,ts in [('probes',P,texts),('evidence',E,[r['text'] for r in csv.DictReader(open('evidence.csv'),delimiter='\\t')])]:
+ print(name)
+ y=(M@G+B).min(-1)
+ for i,t in enumerate(ts):print(i,np.round(y[i],2),t)
+PY
+<lab>/.venv/bin/python inspect_pair_gates.py" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 634ms:
+probes
+0 [-1.3   0.   -0.3   0.86 -0.2 ] The exchange rate used for my card purchase was wrong.
+1 [-0.55 -0.34 -0.25  0.81 -0.04] The currency conversion on my cash withdrawal is incorrect.
+2 [-0.8  -0.19 -0.33  0.6  -0.26] I paid abroad and the exchange rate was terrible.
+3 [-0.83 -0.41 -0.01  0.33 -0.18] My ATM withdrawal used a bad conversion rate.
+4 [-0.68 -0.32 -0.38  0.08 -0.19] The amount charged for my purchase is wrong because of the exchange rate.
+5 [-0.76 -0.91  0.1   0.74 -0.19] Why did you convert my card transaction at such an unfair rate?
+6 [-0.58 -0.38 -0.11  0.62 -0.08] I received less cash than expected due to an incorrect exchange rate.
+7 [-0.71  0.33 -0.2   0.74 -0.24] The rate applied to my overseas shopping does not match the market rate.
+8 [0.23 0.5  0.75 1.2  0.46] The foreign currency rate on this payment is not right.
+9 [-0.1   0.02  0.22  0.95  0.16] I think the exchange rate for the money I took out is mistaken.
+10 [-0.79 -0.23 -0.15  0.88 -0.23] My purchase was converted from euros to pounds at the wrong rate.
+11 [-0.53 -0.36 -0.2   0.69 -0.23] You applied the wrong conversion rate when I withdrew dollars.
+12 [-0.59 -0.26 -0.12  0.7  -0.21] The exchange rate on my bank transfer abroad was incorrect.
+13 [-0.84 -0.37 -0.43  0.21 -0.11] Why is your exchange rate worse than the interbank rate?
+14 [-0.47 -0.29 -0.18  0.91 -0.33] The currency conversion rate looks wrong on this transaction.
+15 [-0.54  0.48 -0.15 -0.5  -0.12] I bought a meal overseas and was overcharged due to the conversion rate.
+16 [-0.4   0.87  0.49  0.82  0.13] The amount charged for my card purchase was wrong.
+17 [-0.66 -0.58 -0.31  0.74 -0.14] The cash machine gave me the wrong amount of money.
+18 [-0.63 -0.79 -0.3   0.51 -0.18] I paid abroad and the payment was declined.
+19 [-0.08  0.37  0.09  0.81  0.08] My ATM withdrawal is pending.
+20 [0.11 0.18 0.11 0.37 0.15] The amount charged for my purchase is wrong because I was charged twice.
+21 [-1.09 -0.7  -0.55  0.27 -0.33] Why did you decline my card transaction?
+22 [-0.17 -0.76 -0.05  0.81 -0.03] I received less cash than requested but the full amount was debited.
+23 [0.16 0.42 0.53 0.14 0.38] The charge for my overseas shopping does not match my receipt.
+24 [-0.73 -0.12  0.    1.1   0.13] The foreign currency payment is not recognised.
+25 [0.49 0.71 0.34 0.98 0.22] I think the money I took out was deducted twice.
+26 [ 0.39 -0.5   0.58  0.74  0.42] My purchase in euros was reversed but I have no refund.
+27 [-1.2  -0.85 -0.96 -0.33 -0.63] You debited my account but the ATM did not dispense dollars.
+28 [-0.81 -0.51  0.18  0.75 -0.16] The bank transfer abroad went to the incorrect account.
+29 [-1.11 -0.26 -0.66  0.02 -0.5 ] Why is my card payment still pending?
+30 [-0.49 -0.32 -0.24  0.74 -0.16] The recipient account looks wrong on this transaction.
+31 [-0.93 -0.36 -0.49 -0.26 -0.33] I bought a meal overseas and was overcharged by the restaurant.
+32 [0.44 0.75 0.78 1.27 0.39] How do I order a replacement card?
+33 [-0.54 -0.06 -0.    0.73  0.06] I lost my debit card.
+34 [-1.11 -0.11 -0.27  0.4  -0.11] My contactless payment feature does not work.
+35 [-0.85  0.38 -0.03  1.04 -0.01] I forgot my card PIN.
+36 [1.06 1.07 1.01 1.23 0.54] How do I activate my new card?
+37 [-0.25  0.32 -0.04  0.86  0.01] How can I add my card to Apple Pay?
+38 [-0.41  0.21  0.23  0.84 -0.09] Where is my bank transfer?
+39 [-0.65  0.38 -0.29  0.99  0.06] How do I top up my account?
+40 [-0.36 -0.33 -0.28  0.17  0.21] My balance has not updated after my deposit.
+41 [0.01 0.64 0.45 0.9  0.69] I cannot verify my identity.
+42 [-0.94  0.17 -0.53  0.4  -0.16] I forgot my app passcode.
+43 [0.12 0.79 0.61 0.9  0.76] Please close my account.
+44 [-1.22  0.17 -0.44  0.78 -0.22] I lost my phone.
+45 [-0.48  0.36 -0.22  0.84 -0.11] Can I open an account in my country?
+46 [-1.13  0.04 -0.53  0.44 -0.16] I want to change my address.
+47 [-0.57  0.05  0.21  0.76  0.  ] What currencies can I hold?
+48 [-0.29  0.34  0.11  0.87 -0.16] How do I exchange euros into pounds?
+49 [-0.46  0.05 -0.22  0.65 -0.24] What is your exchange rate today?
+50 [ 0.23 -0.27  0.31  0.13  0.26] Why was I charged a cash withdrawal fee?
+51 [0.17 0.67 0.81 0.23 0.49] What is the fee for an international transfer?
+52 [-0.16  0.01  0.45  0.8   0.15] My card was stolen.
+53 [-1.28 -0.48 -0.6   0.25 -0.24] I did not make this card purchase abroad.
+54 [-0.46 -0.46 -0.08  0.7  -0.  ] A cash withdrawal I never made appeared on my account.
+55 [ 0.18 -0.36  0.52  0.67  0.46] The merchant promised a refund but it has not arrived.
+56 [-0.6  -0.29 -0.36  0.38 -0.23] My direct debit was taken twice.
+57 [-1.37  0.11 -0.29  0.74 -0.04] I want to cancel a pending card payment.
+58 [-1.22 -0.45 -0.38  0.28 -0.22] The ATM kept my card.
+59 [-1.06 -0.43 -0.28  0.74 -0.2 ] The card payment went through in the wrong currency.
+60 [-0.33 -0.06  0.13  0.41  0.09] How can I choose which currency to pay in?
+61 [-0.03  0.06  0.42  0.83  0.5 ] Does my card support Japanese yen?
+62 [0.06 0.39 0.16 0.82 0.31] How much cash may I withdraw overseas?
+63 [-1.12  0.4  -0.13  1.27  0.29] Can I withdraw foreign cash on holiday?
+evidence
+0 [ 0.06 -0.34  0.17  0.62 -0.03] I was charged the wing amount for an item.
+1 [-0.17 -0.5   0.13  0.98  0.07] When I made a cash transfer abroad the wrong exchange rate was applied
+2 [-0.76 -0.53  0.03  0.9  -0.07] My card payment had the wrong exchange rate
+3 [-0.75 -0.21 -0.48  0.61 -0.19] Why on earth is the exchange rate so bad?   Can I get a rate closer to the actual interbank rate?
+4 [-0.75 -0.76 -0.4   0.66 -0.29] I withdrew cash and I think the exchange rate is wrong.
+5 [-0.59 -0.33 -0.14  0.76 -0.26] When I got cash the exchange rate was wrong
+6 [-0.85  0.22 -0.6   0.49 -0.37] The exchange rate is incorrect on an item I recently purchased in a foreign country.
+7 [-1.21 -0.38 -0.23  0.34 -0.04] Why is the exchange rate on my card wrong?
+8 [-0.64 -0.76 -0.18  0.83 -0.05] I purchased something overseas and the incorrect exchange rate was applied.
+9 [-1.46 -0.35 -1.03 -0.05 -0.59] The exchange rate was incorrect for this item I bought.
+10 [-0.52 -0.34  0.15  1.01  0.19] The exchange rate for case abroad is applied wrong.
+11 [0.23 0.37 0.58 1.01 0.39] Can I get money in my home currency at an ATM? I'm on vacation and don't have cash with me. This is cause for a bit of concern. Is it possible to withdraw here without additional cost?
+12 [-0.13 -0.77  0.04  0.54  0.11] What is wrong with the exchange rate? This should have been a much higher amount of cash for that to apply.
+13 [-0.73 -0.08 -0.39  0.55 -0.4 ] Why was the wrong rate applied when I bought something in a different currency?
+14 [-1.03  0.05 -0.69  0.45 -0.41] There's an error in regards to the exchange rate for an item I bought.
+15 [-0.22  0.32  0.06  0.91 -0.33] what is the correct exchange rate for getting cash
+16 [-1.09 -0.26 -0.57  0.21 -0.36] I have been waiting for my card payment to be moved from pending status for an unusually long time.  What is going on here and do you have an idea of when I can expect it to go through?
+17 [-0.69 -0.34 -0.57  0.17 -0.38] I tried to withdraw some money from an ATM this morning but wasn't able to get the amount of cash I needed. The amount in the app says what I was trying to withdraw was deducted, but I don't have any money. What do I do about this?
+18 [-1.51 -0.18 -0.59  0.3  -0.21] What should I do about a direct debit that I did not set up?
+19 [0.2  0.75 0.71 0.98 0.32] is there a foreign currencies charge?
+20 [-0.36 -1.13 -0.35 -0.44 -0.28] Why did I not get my refund yet?
+21 [0.07 0.08 0.62 0.53 0.61] I was mistakenly charged a fee for using my card.
+22 [ 0.33 -0.06  0.33  0.37  0.37] The ATM charged me an extra fee, Why?
+23 [ 0.31 -0.04  0.25  0.11  0.22] My transaction went through but I was charged a fee. Why?
+24 [0.31 0.76 0.14 0.35 0.72] Will I get charged fees when I add money with an international card?
+25 [0.17 0.   0.36 0.61 0.47] So I just went to the ATM to get some cash.  I input that I needed 100 pounds but I only got 80.  I have the receipt  and I am in need of the extra money.  How do I go about obtaining the missing amount?
+26 [-0.02  0.09  0.25  0.93  0.35] I don't think I made this transaction on my statement
+27 [-1.02 -0.62 -0.65  0.21 -0.53] There is a strange charge on my debit statement
+28 [ 0.48  0.48  0.43 -0.06  0.49] Why do i have an extra fee on my statement?
+29 [-1.14 -0.75 -0.37  0.49 -0.28] I was out today looking forward to paying with my brand new card, turns out the payment just kept getting declined. This is pretty sad, what's going on?
+30 [0.24 0.46 0.69 0.46 0.69] What is this extra fee while I was doing a transfer?
+31 [ 0.07 -0.31  0.48  1.01  0.02] My cash withdrawal shows pending, why?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from scorer import *
+import numpy as np,json,csv
+D=np.load('directions.npz');G=np.load('gates.npz');S=load('scorer_in.npz')
+for name in ['probes','evidence']:
+ M=np.load(name+'_M.npz')['M'];z=logits(S,M);x=M@D['w']+D['b'];y=(M@G['w']+G['b']).min(-1)
+ zz=z+np.minimum(3,8*np.minimum(np.maximum(0,x-.15),np.maximum(0,y-.25)))
+ print(name)
+ if name=='probes':print('targets',sum(zz[:16].argmax(-1)==3),'controls preserved',sum(zz[16:].argmax(-1)==z[16:].argmax(-1)))
+ else:print('correct',sum(zz[:16].argmax(-1)==3)+sum(zz[16:].argmax(-1)==z[16:].argmax(-1)))
+ for i in range(len(M)):
+  if (name=='probes' and i>=16 and zz[i].argmax()"'!=z[i].argmax()) or (name=='"'evidence' and i<16 and zz[i].argmax()"'!=3): print(i,DEPTS[z[i].argmax()],DEPTS[zz[i].argmax()])
+PY' in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 651ms:
+probes
+targets 11 controls preserved 40
+24 disputes fees_fx
+32 cards disputes
+45 cards disputes
+48 cards fees_fx
+49 cards fees_fx
+59 disputes fees_fx
+61 cards fees_fx
+62 transfers_topups fees_fx
+evidence
+correct 30
+9 disputes disputes
+11 cards transfers_topups
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The checks still show errors. I am testing a gate that compares fees_fx with each other department separately. The original weights remain unchanged. I will record the remaining errors and route changes in NOTES.md.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "python3 - <<'PY'
+p='make_scorer.py';s=open(p).read();start=s.index('pos = A[:, 3].mean(0)')
+s=s[:start]+'''gate_w = []
+gate_b = []
+for other in [0, 1, 2, 4]:
+    pos = A[:, 3].mean(0)
+    neg = A[:, other].mean(0)
+    d = perpendicular(pos - neg, background)
+    w = d / np.dot(d, pos - neg)
+    gate_w.append(w)
+    gate_b.append(-np.dot(neg, w))
+
+# Require all four option comparisons. Each must clear a quarter of the
+# authored mean-to-mean separation. The semantic threshold remains 0.15.
+# A slope of 8 and cap of 4 provide a bounded correction in logit units.
+S = load('scorer_in.npz')
+layers = []
+layers.append((8 * np.stack([fx_w] + gate_w, axis=1),
+               8 * np.array([fx_b - .15] + [b - .25 for b in gate_b])))
+# The identity min(a,b) = a - relu(a-b), for nonnegative a and b,
+# implements the conjunction without multiplying input-dependent features.
+width = 5
+while width > 1:
+    W = np.zeros((width, width))
+    W[0, 0] = 1
+    W[0, 1] = 1
+    W[1, 1] = -1
+    for j in range(2, width):
+        W[j, j] = 1
+    layers.append((W, np.zeros(width)))
+    W = np.zeros((width, width - 1))
+    W[0, 0] = 1
+    W[1, 0] = -1
+    for j in range(2, width):
+        W[j, j - 1] = 1
+    layers.append((W, np.zeros(width - 1)))
+    width -= 1
+layers.append((np.array([[1, 1]]), np.array([0, -4])))
+layers.append((np.array([[1], [-1]]), np.zeros(1)))
+for index, (W, b) in enumerate(layers):
+    S[f'extra_W{index}'] = W.astype(np.float32)
+    S[f'extra_b{index}'] = b.astype(np.float32)
+save(S, 'scorer_out.npz')
+'''
+open(p,'w').write(s)
+PY
+<lab>/.venv/bin/python make_scorer.py
+<lab>/.venv/bin/python - <<'PY'
+import json,subprocess
+samples={
+'correction':[
+'The exchange rate for my restaurant payment seems incorrect.',
+'My cash withdrawal was converted at a worse rate than advertised.',
+'The currency conversion for my card purchase overcharged me.',
+'The euro to dollar rate on my ATM withdrawal is wrong.',
+'I bought a jacket abroad and the bank used an incorrect rate.',
+'The conversion rate on my grocery payment is unfair.',
+'I disagree with the exchange rate used for this cash transaction.',
+'The final debit is too high because my foreign purchase used the wrong exchange rate.'
+],
+'control':[
+'The cash machine gave me fifty dollars less than I requested.',
+'The restaurant charged my card two times.',
+'I cannot recognise an overseas purchase on my account.',
+'Please cancel my card payment which is still pending.',
+'When will my replacement debit card arrive?',
+'My transfer has not reached the destination bank.',
+'I need to update my phone number.',
+'How do I reset my card PIN?'
+]}
+json.dump(samples,open('validation_messages.json','w'),indent=2)
+subprocess.run(['<lab>/.venv/bin/python','embed.py','validation_M.npz']+sum(samples.values(),[]),check=True)
+PY" in $WSROOT/laya/s0/astra-r0/step1
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,csv,json
+from scorer import *
+S=load('scorer_in.npz');T=load('scorer_out.npz');D=np.load('directions.npz');G=np.load('gates.npz')
+assert all(np.array_equal(v,T[k]) for k,v in S.items())
+assert all(np.isfinite(v).all() for v in T.values())
+for name in ['evidence','probes']:
+ M=np.load(name+'_M.npz')['M'];z=logits(S,M);q=logits(T,M);a=z.argmax(-1);b=q.argmax(-1)
+ expected=np.minimum(4,8*np.maximum(0,np.minimum(M@D['w']+D['b']-.15,(M@G['w']+G['b']-.25).min(-1))))
+ print('Module arithmetic max error:',np.max(abs((q-z)-expected)))
+ if name=='evidence':
+  rows=list(csv.DictReader(open('evidence.csv'),delimiter='\\t')); print('Evidence',sum(DEPTS[v]==r['correct'] for v,r in zip(b,rows)), '/32; controls unchanged',sum(a[16:]==b[16:]),'/16')
+  for i,r in enumerate(rows):
+   if DEPTS[b[i]]"'!=r['"'correct']:print('Unresolved',i,r['text'])
+ else:print('Development correction probes',sum(b[:16]==3),'/16; controls unchanged',sum(a[16:]==b[16:]),'/48')
+print('Original arrays unchanged; all weights finite.')
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 616ms:
+Module arithmetic max error: 0.00015783309936523438
+Evidence 31 /32; controls unchanged 16 /16
+Unresolved 9 The exchange rate was incorrect for this item I bought.
+Module arithmetic max error: 0.00040459632873535156
+Development correction probes 11 /16; controls unchanged 40 /48
+Original arrays unchanged; all weights finite.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 25741ms:
+W1104 11:27:19.522000 72346 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote validation_M.npz 16 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,json
+from scorer import *
+S=load('scorer_in.npz');T=load('scorer_out.npz');M=np.load('validation_M.npz')['M'];a=predict(S,M);b=predict(T,M)
+texts=sum(json.load(open('validation_messages.json')).values(),[])
+print('New correction probes:',sum(v=='fees_fx' for v in b[:8]),'/8; new controls unchanged:',sum(x==y for x,y in zip(a[8:],b[8:])),'/8')
+for i,t in enumerate(texts):print(i,a[i],b[i],t)
+json.dump({'base':a,'edited':b,'messages':texts},open('validation_results.json','w'),indent=2)
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 559ms:
+New correction probes: 6 /8; new controls unchanged: 7 /8
+0 disputes disputes The exchange rate for my restaurant payment seems incorrect.
+1 disputes disputes My cash withdrawal was converted at a worse rate than advertised.
+2 fees_fx fees_fx The currency conversion for my card purchase overcharged me.
+3 disputes fees_fx The euro to dollar rate on my ATM withdrawal is wrong.
+4 disputes fees_fx I bought a jacket abroad and the bank used an incorrect rate.
+5 fees_fx fees_fx The conversion rate on my grocery payment is unfair.
+6 disputes fees_fx I disagree with the exchange rate used for this cash transaction.
+7 disputes fees_fx The final debit is too high because my foreign purchase used the wrong exchange rate.
+8 disputes disputes The cash machine gave me fifty dollars less than I requested.
+9 disputes disputes The restaurant charged my card two times.
+10 disputes disputes I cannot recognise an overseas purchase on my account.
+11 disputes disputes Please cancel my card payment which is still pending.
+12 cards cards When will my replacement debit card arrive?
+13 transfers_topups transfers_topups My transfer has not reached the destination bank.
+14 account_security disputes I need to update my phone number.
+15 account_security account_security How do I reset my card PIN?
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The output file passes 31 of 32 supplied examples and keeps all 16 supplied control routes unchanged. On new messages, it routes 6 of 8 exchange-rate complaints correctly and keeps 7 of 8 control routes unchanged. The full routing requirements are not met.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > NOTES.md <<'EOF'
+I kept all original scorer arrays unchanged and added a ReLU correction module.
+
+I wrote paired messages that replace “exchange rate” or “currency conversion rate” with “amount” or “transaction amount.” Mean-vector contrasts define the correction direction. Explicit orthogonal projections remove background, non-target-option, and ordinary relevance directions. Four additional mean-vector contrasts compare fees_fx with each other department. Fixed ReLU layers require these signals together and limit the added score to four logit units.
+
+No training, gradient descent, optimizer, least squares, or fitted solver was used. Supplied evidence labels were used only for forward checks.
+
+Results:
+- Supplied examples: 31/32 correct; all 16 control routes unchanged.
+- Authored development messages: 11/16 correction routes correct; 40/48 control routes unchanged.
+- New validation messages: 6/8 correction routes correct; 7/8 control routes unchanged.
+
+The full requirements are not met. Some exchange-rate complaints still route to disputes, and some unrelated routes change. The hidden test set was not available.
+EOF
+<lab>/.venv/bin/python - <<'PY'
+from pathlib import Path
+import numpy as np
+from scorer import load
+p=Path('NOTES.md');print('NOTES words:',len(p.read_text().split()));assert len(p.read_text().split())<200
+S=load('scorer_in.npz');T=load('scorer_out.npz');assert all(np.array_equal(S[k],T[k]) for k in S)
+for i in range(11):
+ W=T[f'extra_W{i}'];b=T[f'extra_b{i}'];assert W.shape[1]==b.shape[0]
+ if i:assert W.shape[0]==T[f'extra_W{i-1}'].shape[1]
+assert T['extra_W10'].shape[1]==1
+print('scorer_out.npz bytes:',Path('scorer_out.npz').stat().st_size)
+print('Output loads; shapes valid; original arrays unchanged.')
+PY" in $WSROOT/laya/s0/astra-r0/step1
+ succeeded in 659ms:
+NOTES words: 153
+scorer_out.npz bytes: 4238598
+Output loads; shapes valid; original arrays unchanged.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+Created `scorer_out.npz` and `NOTES.md`.
+
+Validation: 31/32 supplied examples pass; all 16 supplied control routes remain unchanged.
+
+Full requirements are not met. Other checks found missed corrections and unrelated route changes. NOTES.md records these limits.
+hook: Stop
+hook: Stop Completed
+tokens used
+115'262
+Created `scorer_out.npz` and `NOTES.md`.
+
+Validation: 31/32 supplied examples pass; all 16 supplied control routes remain unchanged.
+
+Full requirements are not met. Other checks found missed corrections and unrelated route changes. NOTES.md records these limits.

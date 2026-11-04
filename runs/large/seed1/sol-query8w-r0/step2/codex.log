@@ -1,0 +1,678 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s1/sol-query8w-r0/step2
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a57a-c827-7a73-88f5-9d36a2dd8f59
+--------
+user
+Phase 2 of 2: answers.csv holds the correct labels for your queried inputs. Use CANDIDATES.md and answers.csv, then complete TASK.md exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read CANDIDATES.md, answers.csv, and TASK.md, then complete the required work.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "pwd; rg --files -g 'TASK.md' -g 'CANDIDATES.md' -g 'answers.csv' -g 'AGENTS.md'" in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 0ms:
+$WSROOT/large/s1/sol-query8w-r0/step2
+TASK.md
+CANDIDATES.md
+answers.csv
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md CANDIDATES.md answers.csv' in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 0ms:
+# Weight-editing task (step 2 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+## New correction for this step
+(Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+# Candidate rules for step 2
+
+Let `f(x)` be the unchanged logit from `model_in.json`. Each rule escalates only when its resulting logit is greater than zero. Let `E = region_eu` and `I = impact`.
+
+All four rules match all 32 labels in `evidence.csv`, as checked by forward passes. These are hypotheses; the evidence does not identify one rule uniquely.
+
+## A. EU bonus of 20
+
+**Kind: Output shift.** Use `f(x) + 20*E`.
+
+EU alerts receive a fixed bonus. Other alerts keep their current logit.
+
+## B. Increase EU impact by 0.20
+
+**Kind: Input re-interpretation.** Use `f(x')`, where `x'` equals `x` except that `impact' = min(1, I + 0.20*E)`.
+
+EU alerts receive an impact increase, capped at 1. The model then computes its decision from the modified input.
+
+## C. Make the EU bonus depend on impact
+
+**Kind: Interaction.** Use `f(x) + 40*E*I`.
+
+Impact has an additional effect when the alert is in the EU. The bonus is zero at impact 0 and reaches 40 at impact 1.
+
+## D. EU bonus of 25
+
+**Kind: Output shift.** Use `f(x) + 25*E`.
+
+This alternative checks the unresolved bonus value. Both 20 and 25 match the evidence: the most negative changed logit is about -17.884, and the nearest EU negative example has a logit of about -27.265.
+
+## Query design
+
+Rows 1-3 separate the three kinds of rule. Row 4 separates the two fixed bonus values. Rows 5-8 check further combinations of predictions, including impact at its cap. All unspecified feature values are 0.5; every query has `region_eu = 1`.
+
+The table gives candidate predictions, not correct labels. Row numbers refer to data rows in `query.csv`.
+
+| Row | A | B | C | D |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 0 | 1 | 0 |
+| 2 | 0 | 1 | 0 | 0 |
+| 3 | 1 | 1 | 0 | 1 |
+| 4 | 0 | 0 | 0 | 1 |
+| 5 | 0 | 0 | 1 | 1 |
+| 6 | 0 | 1 | 0 | 1 |
+| 7 | 0 | 1 | 1 | 1 |
+| 8 | 1 | 0 | 1 | 1 |
+
+Here, 1 means escalate and 0 means suppress. No model weights were changed.
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+1.000,0.250,0.000,0.500,0.500,1.000,0.500,0.000,1.000,1.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0
+0.500,0.750,0.500,0.500,0.500,0.500,0.500,0.000,1.000,0.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0
+0.100,0.750,0.500,0.500,0.500,1.000,0.500,1.000,1.000,1.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,1
+0.400,0.750,1.000,0.500,0.500,0.000,0.500,1.000,1.000,0.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0
+1.000,0.000,0.000,0.500,0.500,0.500,0.500,1.000,1.000,0.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0
+0.250,0.750,0.500,0.500,0.500,0.500,0.500,1.000,1.000,1.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0
+0.750,0.750,0.500,0.500,0.500,0.000,0.500,0.000,1.000,1.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0
+1.000,0.500,0.000,0.500,0.500,1.000,0.500,0.000,1.000,1.000,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,0.500,1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la; cat model.py; cat evidence.csv' in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 0ms:
+total 456
+drwxr-xr-x@ 15 user  wheel     480 Nov  4 08:34 .
+drwxr-xr-x@  4 user  wheel     128 Nov  4 08:31 ..
+-rw-r--r--@  1 user  wheel    1908 Nov  4 08:34 CANDIDATES.md
+-rw-r--r--@  1 user  wheel    1253 Nov  4 08:31 QUERY.md
+-rw-r--r--@  1 user  wheel    2101 Nov  4 08:31 TASK.md
+-rw-r--r--@  1 user  wheel    1196 Nov  4 08:34 answers.csv
+-rw-r--r--@  1 user  wheel    1408 Nov  4 08:34 answers.npy
+-rw-r--r--@  1 user  wheel    6873 Nov  4 08:34 codex.log
+-rw-r--r--@  1 user  wheel   49511 Nov  4 08:34 codex_a.log
+-rw-r--r--@  1 user  wheel    4560 Nov  4 08:34 default.profraw
+-rw-r--r--@  1 user  wheel    4124 Nov  4 08:31 evidence.csv
+-rw-r--r--@  1 user  wheel    5100 Nov  4 08:31 evidence_step1.csv
+-rw-r--r--@  1 user  wheel     806 Nov  4 08:31 model.py
+-rw-r--r--@  1 user  wheel  117392 Nov  4 08:31 model_in.json
+-rw-r--r--@  1 user  wheel     868 Nov  4 08:34 query.csv
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.963,0.220,0.084,0.422,0.916,0.781,0.589,1.000,1.000,0.000,0.225,0.156,0.238,0.140,0.779,0.361,0.182,0.207,0.965,0.843,1
+0.833,0.300,0.653,0.248,0.901,0.045,0.328,1.000,1.000,0.000,0.988,0.169,0.607,0.812,0.842,0.944,0.391,0.517,0.563,0.810,1
+0.868,0.513,0.920,0.261,0.518,0.112,0.857,0.000,1.000,0.000,0.317,0.944,0.116,0.566,0.475,0.342,0.050,0.298,0.694,0.614,1
+0.716,0.133,0.285,0.096,0.997,0.943,0.203,1.000,1.000,0.000,0.074,0.469,0.107,0.834,0.180,0.788,0.276,0.427,0.017,0.175,1
+0.801,0.564,0.035,0.215,0.538,0.187,0.942,0.000,1.000,0.000,0.098,0.952,0.219,0.946,0.775,0.366,0.121,0.170,0.535,0.906,1
+0.613,0.856,0.279,0.549,0.973,0.489,0.406,0.000,1.000,1.000,0.048,0.982,0.902,0.270,0.808,0.583,0.723,0.861,0.805,0.787,1
+0.382,0.870,0.489,0.299,0.991,0.444,0.964,0.000,1.000,0.000,0.310,0.729,0.552,0.782,0.870,0.827,0.398,0.984,0.698,0.949,1
+0.608,0.718,0.346,0.620,0.078,0.647,0.260,0.000,1.000,0.000,0.627,0.653,0.918,0.673,0.191,0.740,0.589,0.855,0.159,0.060,1
+0.620,0.994,0.088,0.242,0.679,0.790,0.039,0.000,1.000,0.000,0.861,0.334,0.821,0.474,0.628,0.391,0.130,0.916,0.944,0.163,1
+0.859,0.260,0.147,0.984,0.506,0.994,0.832,1.000,1.000,0.000,0.329,0.999,0.840,0.118,0.159,0.458,0.439,0.728,0.722,0.297,1
+0.428,0.970,0.582,0.964,0.448,0.456,0.881,0.000,1.000,1.000,0.160,0.183,0.444,0.144,0.961,0.935,0.996,0.222,0.328,0.805,1
+0.770,0.300,0.656,0.840,0.951,0.396,0.337,1.000,1.000,1.000,0.658,0.335,0.599,0.554,0.776,0.159,0.969,0.787,0.014,0.359,1
+0.310,0.905,0.906,0.349,0.148,0.500,0.250,0.000,1.000,0.000,0.349,0.144,0.224,0.265,0.599,0.066,0.687,0.390,0.556,0.023,1
+0.558,0.656,0.462,0.421,0.426,0.897,0.209,0.000,1.000,1.000,0.484,0.517,0.468,0.490,0.278,0.474,0.102,0.428,0.048,0.899,1
+0.860,0.561,0.400,0.542,0.259,0.558,0.346,0.000,1.000,0.000,0.758,0.080,0.170,0.265,0.183,0.009,0.799,0.495,0.031,0.370,1
+0.387,0.252,0.590,0.668,0.295,0.993,0.351,1.000,1.000,0.000,0.271,0.590,0.215,0.788,0.265,0.796,0.678,0.399,0.462,0.728,1
+0.820,0.773,0.042,0.220,0.674,0.545,0.373,0.000,0.000,0.000,0.843,0.271,0.963,0.385,0.687,0.378,0.348,0.653,0.003,0.163,0
+0.338,0.409,0.399,0.602,0.206,0.132,0.206,0.000,1.000,0.000,0.225,0.182,0.413,0.518,0.599,0.324,0.344,0.649,0.152,0.919,0
+0.557,0.882,0.827,0.124,0.307,0.359,0.360,0.000,0.000,0.000,0.913,0.600,0.653,0.098,0.272,0.940,0.600,0.724,0.210,0.252,0
+0.006,0.781,0.014,0.155,0.735,0.403,0.394,1.000,1.000,0.000,0.489,0.078,0.545,0.531,0.597,0.249,0.668,0.309,0.090,0.449,0
+0.958,0.274,0.161,0.625,0.365,0.213,0.287,1.000,1.000,1.000,0.858,0.449,0.176,0.044,0.335,0.824,0.866,0.755,0.529,0.061,0
+0.063,0.583,0.634,0.362,0.060,0.958,0.491,0.000,0.000,1.000,0.028,0.837,0.810,0.763,0.955,0.562,0.101,0.696,0.266,0.568,0
+0.150,0.205,0.502,0.823,0.024,0.593,0.989,0.000,1.000,0.000,0.849,0.706,0.989,0.420,0.539,0.626,0.540,0.214,0.619,0.484,0
+0.317,0.571,0.915,0.436,0.559,0.085,0.784,1.000,0.000,0.000,0.307,0.032,0.908,0.200,0.055,0.606,0.338,0.206,0.122,0.607,0
+0.766,0.314,0.722,0.932,0.068,0.914,0.216,1.000,1.000,1.000,0.996,0.032,0.959,0.148,0.740,0.446,0.199,0.936,0.162,0.027,1
+0.984,0.762,0.531,0.644,0.725,0.434,0.906,0.000,1.000,0.000,0.585,0.936,0.796,0.939,0.777,0.076,0.832,0.240,0.841,0.318,1
+0.241,0.466,0.692,0.627,0.122,0.922,0.770,0.000,1.000,1.000,0.310,0.026,0.196,0.362,0.491,0.806,0.122,0.704,0.099,0.300,0
+0.470,0.264,0.319,0.758,0.393,0.855,0.147,0.000,0.000,0.000,0.479,0.271,0.963,0.400,0.826,0.346,0.303,0.057,0.190,0.613,0
+0.040,0.883,0.372,0.879,0.444,0.788,0.539,0.000,1.000,0.000,0.587,0.335,0.475,0.086,0.891,0.805,0.020,0.844,0.528,0.605,0
+0.374,0.321,0.394,0.329,0.992,0.190,0.658,0.000,1.000,0.000,0.673,0.608,0.195,0.764,0.985,0.187,0.763,0.463,0.385,0.675,0
+0.147,0.571,0.993,0.503,0.742,0.695,0.311,0.000,0.000,0.000,0.277,0.802,0.321,0.706,0.016,0.296,0.967,0.204,0.853,0.416,0
+0.709,0.232,0.164,0.513,0.861,0.599,0.343,0.000,1.000,1.000,0.119,0.486,0.144,0.709,0.888,0.368,0.505,0.149,0.846,0.632,0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat evidence_step1.csv; <lab>/.venv/bin/python - <<'PY'
+import model, numpy as np
+L=model.load('model_in.json')
+for i,(w,b) in enumerate(L):
+ print('Layer',i,'shape',w.shape,'bias',b,'nonzero',np.count_nonzero(w))
+ if i==0:
+  for j in range(w.shape[1]):
+   nz=np.flatnonzero(w[:,j]); print(j,[(model.FEATURES[k],round(w[k,j],6)) for k in nz], 'b=',b[j])
+ else:
+  print(w)
+PY" in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 0ms:
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.873,0.089,0.093,0.434,0.651,0.548,0.796,1.000,1.000,0.000,0.249,0.763,0.564,0.495,0.961,0.074,0.409,0.150,0.925,0.213,1
+0.008,0.401,0.812,0.949,0.390,0.906,0.593,1.000,1.000,1.000,0.998,0.890,0.221,0.842,0.744,0.488,0.606,0.514,0.580,0.179,0
+0.431,0.662,0.561,0.973,0.275,0.014,0.840,0.000,1.000,0.000,0.341,0.417,0.197,0.472,0.533,0.283,0.220,0.151,0.620,0.596,0
+0.364,0.767,0.651,0.497,0.408,0.698,0.426,0.000,0.000,0.000,0.295,0.799,0.552,0.027,0.011,0.543,0.740,0.685,0.062,0.340,0
+0.537,0.511,0.502,0.271,0.008,0.170,0.310,1.000,1.000,0.000,0.254,0.917,0.218,0.951,0.993,0.256,0.376,0.619,0.415,0.665,1
+0.410,0.798,0.956,0.359,0.461,0.406,0.077,0.000,1.000,0.000,0.379,0.601,0.731,0.747,0.436,0.834,0.617,0.000,0.855,0.189,1
+0.241,0.917,0.961,0.707,0.870,0.049,0.015,0.000,1.000,1.000,0.246,0.193,0.675,0.842,0.641,0.336,0.345,0.767,0.534,0.188,0
+0.005,0.551,0.937,0.879,0.989,0.682,0.766,1.000,0.000,0.000,0.626,0.664,0.073,0.325,0.534,0.961,0.307,0.057,0.565,0.229,0
+0.650,0.033,0.946,0.988,0.144,0.360,0.646,0.000,0.000,1.000,0.046,0.327,0.195,0.228,0.609,0.050,0.066,0.853,0.261,0.120,0
+0.903,0.507,0.069,0.690,0.051,0.105,0.338,0.000,0.000,0.000,0.033,0.189,0.931,0.062,0.137,0.261,0.847,0.233,0.201,0.179,0
+0.254,0.816,0.811,0.461,0.538,0.783,0.905,0.000,1.000,0.000,0.189,0.957,0.059,0.181,0.273,0.852,0.196,0.703,0.743,0.742,1
+0.536,0.650,0.330,0.886,0.260,0.740,0.089,0.000,0.000,1.000,0.787,0.119,0.368,0.553,0.484,0.685,0.590,0.938,0.672,0.859,0
+0.625,0.378,0.954,0.786,0.959,0.197,0.231,0.000,0.000,1.000,0.826,0.137,0.601,0.865,0.719,0.297,0.394,0.963,0.256,0.912,0
+0.495,0.557,0.797,0.862,0.034,0.483,0.919,0.000,0.000,0.000,0.139,0.636,0.100,0.438,0.999,0.769,0.355,0.761,0.420,0.584,0
+0.400,0.891,0.297,0.821,0.652,0.013,0.159,0.000,1.000,0.000,0.779,0.562,0.327,0.772,0.419,0.443,0.269,0.125,0.928,0.363,0
+0.423,0.927,0.220,0.762,0.985,0.679,0.935,0.000,0.000,0.000,0.365,0.418,0.780,0.356,0.683,0.953,0.302,0.763,0.341,0.756,0
+0.148,0.737,0.046,0.962,0.904,0.440,0.576,0.000,1.000,0.000,0.324,0.786,0.059,0.315,0.590,0.358,0.868,0.656,0.564,0.123,0
+0.209,0.002,0.371,0.637,0.454,0.928,0.730,0.000,0.000,0.000,0.028,0.463,0.109,0.868,0.210,0.681,0.160,0.793,0.357,0.493,0
+0.624,0.951,0.224,0.696,0.318,0.411,0.866,0.000,0.000,0.000,0.237,0.238,0.298,0.854,0.331,0.542,0.335,0.181,0.198,0.136,1
+0.315,0.513,0.189,0.768,0.435,0.294,0.387,0.000,0.000,0.000,0.005,0.149,0.305,0.364,0.419,0.259,0.555,0.828,0.161,0.069,0
+0.857,0.559,0.697,0.654,0.192,0.903,0.937,0.000,0.000,0.000,0.633,0.075,0.303,0.886,0.238,0.053,0.015,0.272,0.529,0.227,1
+0.069,0.871,0.869,0.706,0.379,0.835,0.524,1.000,1.000,0.000,0.292,0.460,0.138,0.470,0.402,0.671,0.342,0.902,0.815,0.371,1
+0.286,0.495,0.535,0.983,0.783,0.126,0.671,0.000,0.000,0.000,0.587,0.925,0.418,0.726,0.997,0.793,0.399,0.472,0.436,0.048,0
+0.159,0.521,0.345,0.737,0.645,0.624,0.094,0.000,0.000,0.000,0.734,0.249,0.528,0.091,0.425,0.760,0.267,0.811,0.583,0.122,0
+0.795,0.848,0.639,0.675,0.307,0.089,0.265,0.000,1.000,0.000,0.497,0.787,0.323,0.933,0.385,0.928,0.191,0.944,0.210,0.257,1
+0.408,0.213,0.548,0.690,0.743,0.472,0.688,0.000,0.000,0.000,0.348,0.524,0.070,0.467,0.399,0.053,0.684,0.870,0.372,0.757,0
+0.994,0.018,0.852,0.749,0.127,0.543,0.707,1.000,0.000,0.000,0.758,0.470,0.312,0.029,0.222,0.762,0.102,0.404,0.049,0.918,1
+0.000,0.385,0.422,0.812,0.354,0.633,0.707,0.000,0.000,0.000,0.061,0.995,0.432,0.493,0.521,0.350,0.640,0.521,0.581,0.432,0
+0.832,0.436,0.904,0.934,0.559,0.058,0.892,1.000,1.000,0.000,0.179,0.555,0.430,0.776,0.055,0.191,0.254,0.559,0.822,0.734,1
+0.659,0.238,0.790,0.650,0.805,0.838,0.263,0.000,0.000,0.000,0.049,0.067,0.986,0.506,0.893,0.782,0.430,0.316,0.869,0.337,1
+0.394,0.663,0.769,0.744,0.693,0.796,0.397,0.000,1.000,1.000,0.610,0.118,0.106,0.657,0.479,0.435,0.215,0.579,0.748,0.099,1
+0.364,0.402,0.972,0.893,0.567,0.146,0.879,0.000,0.000,0.000,0.035,0.015,0.800,0.306,0.120,0.412,0.379,0.430,0.057,0.420,0
+0.873,0.089,0.093,0.250,0.651,0.548,0.796,1.000,1.000,0.000,0.249,0.763,0.564,0.495,0.961,0.074,0.409,0.150,0.925,0.213,1
+0.873,0.089,0.093,1.000,0.651,0.548,0.796,1.000,1.000,0.000,0.249,0.763,0.564,0.495,0.961,0.074,0.409,0.150,0.925,0.213,1
+0.624,0.951,0.224,0.000,0.318,0.411,0.866,0.000,0.000,0.000,0.237,0.238,0.298,0.854,0.331,0.542,0.335,0.181,0.198,0.136,1
+0.624,0.951,0.224,1.000,0.318,0.411,0.866,0.000,0.000,0.000,0.237,0.238,0.298,0.854,0.331,0.542,0.335,0.181,0.198,0.136,1
+0.659,0.238,0.790,0.000,0.805,0.838,0.263,0.000,0.000,0.000,0.049,0.067,0.986,0.506,0.893,0.782,0.430,0.316,0.869,0.337,1
+0.659,0.238,0.790,1.000,0.805,0.838,0.263,0.000,0.000,0.000,0.049,0.067,0.986,0.506,0.893,0.782,0.430,0.316,0.869,0.337,1
+0.640,0.951,0.224,0.500,0.318,0.411,0.866,0.000,0.000,0.000,0.237,0.238,0.298,0.854,0.331,0.542,0.335,0.181,0.198,0.136,1
+0.660,0.951,0.224,0.500,0.318,0.411,0.866,0.000,0.000,0.000,0.237,0.238,0.298,0.854,0.331,0.542,0.335,0.181,0.198,0.136,1
+Layer 0 shape (20, 64) bias [-0.00933851 -0.50255285  0.46378201  0.6455751   0.63448767 -0.40952819
+  0.40771768 -0.29484577  0.68521535  0.68336296 -0.03748801 -0.40098272
+ -0.04447941  0.83176096 -0.45623204  0.55130692 -0.46154439 -0.48326738
+  0.37128365 -0.10974532 -0.4099     -0.46241008  0.67199594 -0.51267596
+  0.61843655 -0.07287094  0.44503503  0.52079033  0.67526225 -0.5028857
+  0.58520532  0.0798289   0.54539351 -0.37695923 -0.53809552  0.2907157
+  0.72062153  0.63249518 -0.41121636 -0.51771589 -0.47514183 -0.04785301
+  0.53452802 -0.01358789 -0.47029904  0.61908026  0.69831685  0.10658186
+  0.39761963  0.51755181  0.5268445  -0.03197024  0.64549779 -0.4184461
+  0.68355532  0.54940427  0.5239498   0.62514357  0.4296974   0.63997944
+  0.46764831  0.47045551  0.55287025  0.59516416] nonzero 1216
+0 [('impact', np.float64(-0.242489)), ('urgency', np.float64(-0.427208)), ('users_affected', np.float64(0.174078)), ('confidence', np.float64(-0.233906)), ('error_rate', np.float64(-0.302055)), ('latency_spike', np.float64(-0.460408)), ('tier_critical', np.float64(-0.389071)), ('region_eu', np.float64(0.202095)), ('maintenance_window', np.float64(-0.198622)), ('retry_count', np.float64(-0.176104)), ('service_age', np.float64(-0.53008)), ('on_call_load', np.float64(-0.119851)), ('dup_alerts', np.float64(0.285961)), ('sensor_drift', np.float64(-0.386606)), ('aux_1', np.float64(-0.303277)), ('aux_2', np.float64(-0.138488)), ('aux_3', np.float64(0.096548)), ('aux_4', np.float64(-0.062297)), ('aux_5', np.float64(0.174446))] b= -0.009338507173830194
+1 [('impact', np.float64(0.3408)), ('urgency', np.float64(0.135882)), ('users_affected', np.float64(-0.007018)), ('confidence', np.float64(-0.054957)), ('error_rate', np.float64(0.352998)), ('latency_spike', np.float64(-0.115554)), ('tier_critical', np.float64(0.224447)), ('region_eu', np.float64(0.102411)), ('maintenance_window', np.float64(0.026289)), ('retry_count', np.float64(0.092688)), ('service_age', np.float64(-0.219118)), ('on_call_load', np.float64(0.577544)), ('dup_alerts', np.float64(0.14968)), ('sensor_drift', np.float64(0.516219)), ('aux_1', np.float64(0.109984)), ('aux_2', np.float64(0.794461)), ('aux_3', np.float64(0.125343)), ('aux_4', np.float64(-0.439435)), ('aux_5', np.float64(0.18343))] b= -0.502552851608743
+2 [('impact', np.float64(-0.12407)), ('urgency', np.float64(-0.355616)), ('users_affected', np.float64(-0.328261)), ('confidence', np.float64(0.370054)), ('error_rate', np.float64(0.173543)), ('latency_spike', np.float64(-0.580374)), ('tier_critical', np.float64(0.179799)), ('region_eu', np.float64(0.044188)), ('maintenance_window', np.float64(-0.16746)), ('retry_count', np.float64(0.014976)), ('service_age', np.float64(0.38995)), ('on_call_load', np.float64(0.470824)), ('dup_alerts', np.float64(-0.012383)), ('sensor_drift', np.float64(0.368653)), ('aux_1', np.float64(0.195483)), ('aux_2', np.float64(-0.432455)), ('aux_3', np.float64(0.037994)), ('aux_4', np.float64(0.011387)), ('aux_5', np.float64(0.235081))] b= 0.4637820143757929
+3 [('impact', np.float64(-0.369306)), ('urgency', np.float64(-0.32742)), ('users_affected', np.float64(0.150202)), ('confidence', np.float64(0.498271)), ('error_rate', np.float64(-0.191319)), ('latency_spike', np.float64(0.223616)), ('tier_critical', np.float64(-0.659708)), ('region_eu', np.float64(-0.198143)), ('maintenance_window', np.float64(-0.196547)), ('retry_count', np.float64(-0.045297)), ('service_age', np.float64(-0.246087)), ('on_call_load', np.float64(0.431541)), ('dup_alerts', np.float64(0.548536)), ('sensor_drift', np.float64(-0.114046)), ('aux_1', np.float64(0.044828)), ('aux_2', np.float64(-0.168649)), ('aux_3', np.float64(-0.293679)), ('aux_4', np.float64(-0.05514)), ('aux_5', np.float64(0.209234))] b= 0.6455751026693974
+4 [('impact', np.float64(-0.036214)), ('urgency', np.float64(-0.281101)), ('users_affected', np.float64(0.10448)), ('confidence', np.float64(0.106784)), ('error_rate', np.float64(-0.401638)), ('latency_spike', np.float64(-0.369933)), ('tier_critical', np.float64(0.228495)), ('region_eu', np.float64(0.072527)), ('maintenance_window', np.float64(0.070622)), ('retry_count', np.float64(0.309625)), ('service_age', np.float64(0.486367)), ('on_call_load', np.float64(0.453363)), ('dup_alerts', np.float64(-0.525136)), ('sensor_drift', np.float64(0.250221)), ('aux_1', np.float64(0.057674)), ('aux_2', np.float64(-0.199471)), ('aux_3', np.float64(-0.33707)), ('aux_4', np.float64(0.354845)), ('aux_5', np.float64(0.106502))] b= 0.6344876659428381
+5 [('impact', np.float64(0.854008)), ('urgency', np.float64(0.12773)), ('users_affected', np.float64(0.18354)), ('confidence', np.float64(-0.186659)), ('error_rate', np.float64(0.585619)), ('latency_spike', np.float64(-0.148213)), ('tier_critical', np.float64(0.468913)), ('region_eu', np.float64(0.276224)), ('maintenance_window', np.float64(0.521873)), ('retry_count', np.float64(0.194314)), ('service_age', np.float64(-0.34261)), ('on_call_load', np.float64(-0.150373)), ('dup_alerts', np.float64(-0.010272)), ('sensor_drift', np.float64(0.37223)), ('aux_1', np.float64(-0.059101)), ('aux_2', np.float64(0.069634)), ('aux_3', np.float64(0.043913)), ('aux_4', np.float64(0.206516)), ('aux_5', np.float64(-0.028252))] b= -0.4095281893007146
+6 [('impact', np.float64(-0.384805)), ('urgency', np.float64(-0.007727)), ('users_affected', np.float64(-0.523703)), ('confidence', np.float64(0.24353)), ('error_rate', np.float64(0.222534)), ('latency_spike', np.float64(-0.337197)), ('tier_critical', np.float64(0.428255)), ('region_eu', np.float64(0.261975)), ('maintenance_window', np.float64(0.287758)), ('retry_count', np.float64(-0.164408)), ('service_age', np.float64(-0.213987)), ('on_call_load', np.float64(0.283166)), ('dup_alerts', np.float64(0.073425)), ('sensor_drift', np.float64(-0.187291)), ('aux_1', np.float64(0.132318)), ('aux_2', np.float64(-0.04543)), ('aux_3', np.float64(-0.128954)), ('aux_4', np.float64(0.191918)), ('aux_5', np.float64(-0.337454))] b= 0.4077176843532544
+7 [('impact', np.float64(0.528426)), ('urgency', np.float64(-0.076063)), ('users_affected', np.float64(-0.136379)), ('confidence', np.float64(0.169836)), ('error_rate', np.float64(0.431253)), ('latency_spike', np.float64(0.211731)), ('tier_critical', np.float64(-0.052783)), ('region_eu', np.float64(0.501254)), ('maintenance_window', np.float64(-0.262865)), ('retry_count', np.float64(-1.0161)), ('service_age', np.float64(0.409886)), ('on_call_load', np.float64(-0.528812)), ('dup_alerts', np.float64(-0.087101)), ('sensor_drift', np.float64(0.293814)), ('aux_1', np.float64(-0.05709)), ('aux_2', np.float64(0.06212)), ('aux_3', np.float64(-0.104474)), ('aux_4', np.float64(-0.237556)), ('aux_5', np.float64(-0.446424))] b= -0.29484577260683353
+8 [('impact', np.float64(-0.089138)), ('urgency', np.float64(-0.152943)), ('users_affected', np.float64(0.841768)), ('confidence', np.float64(0.186204)), ('error_rate', np.float64(-1.01661)), ('latency_spike', np.float64(-0.160652)), ('tier_critical', np.float64(0.206796)), ('region_eu', np.float64(-0.346213)), ('maintenance_window', np.float64(-0.143716)), ('retry_count', np.float64(0.14051)), ('service_age', np.float64(0.240781)), ('on_call_load', np.float64(0.095046)), ('dup_alerts', np.float64(-0.22123)), ('sensor_drift', np.float64(-0.087615)), ('aux_1', np.float64(0.015954)), ('aux_2', np.float64(0.072986)), ('aux_3', np.float64(0.032504)), ('aux_4', np.float64(-0.201148)), ('aux_5', np.float64(-0.033273))] b= 0.6852153531145623
+9 [('impact', np.float64(-0.593451)), ('urgency', np.float64(-0.262168)), ('users_affected', np.float64(0.049352)), ('confidence', np.float64(-0.12635)), ('error_rate', np.float64(-0.439163)), ('latency_spike', np.float64(0.306827)), ('tier_critical', np.float64(-0.203161)), ('region_eu', np.float64(0.135164)), ('maintenance_window', np.float64(0.083727)), ('retry_count', np.float64(0.242171)), ('service_age', np.float64(0.244484)), ('on_call_load', np.float64(-0.013501)), ('dup_alerts', np.float64(-0.298112)), ('sensor_drift', np.float64(0.580496)), ('aux_1', np.float64(0.379594)), ('aux_2', np.float64(-0.04004)), ('aux_3', np.float64(0.069646)), ('aux_4', np.float64(0.119772)), ('aux_5', np.float64(-0.13044))] b= 0.6833629592466635
+10 [('impact', np.float64(0.717628)), ('urgency', np.float64(0.526282)), ('users_affected', np.float64(-0.916583)), ('confidence', np.float64(0.009896)), ('error_rate', np.float64(-0.929877)), ('latency_spike', np.float64(0.388738)), ('tier_critical', np.float64(0.218398)), ('region_eu', np.float64(0.012847)), ('maintenance_window', np.float64(0.017428)), ('retry_count', np.float64(-0.18562)), ('service_age', np.float64(-0.072759)), ('on_call_load', np.float64(-0.005196)), ('dup_alerts', np.float64(0.276922)), ('sensor_drift', np.float64(0.071778)), ('aux_1', np.float64(-0.0515)), ('aux_2', np.float64(-0.081136)), ('aux_3', np.float64(-0.048619)), ('aux_4', np.float64(0.04486)), ('aux_5', np.float64(0.018945))] b= -0.03748800764651141
+11 [('impact', np.float64(0.536103)), ('urgency', np.float64(0.655139)), ('users_affected', np.float64(0.185919)), ('confidence', np.float64(-0.55235)), ('error_rate', np.float64(0.444838)), ('latency_spike', np.float64(0.14468)), ('tier_critical', np.float64(0.293087)), ('region_eu', np.float64(0.128888)), ('maintenance_window', np.float64(-0.213772)), ('retry_count', np.float64(0.227658)), ('service_age', np.float64(0.391419)), ('on_call_load', np.float64(0.38042)), ('dup_alerts', np.float64(-0.109909)), ('sensor_drift', np.float64(0.040886)), ('aux_1', np.float64(-0.045907)), ('aux_2', np.float64(0.193303)), ('aux_3', np.float64(0.743696)), ('aux_4', np.float64(-0.481496)), ('aux_5', np.float64(-0.243525))] b= -0.4009827227773786
+12 [('impact', np.float64(0.360594)), ('urgency', np.float64(0.2012)), ('users_affected', np.float64(-0.328681)), ('confidence', np.float64(-0.265768)), ('error_rate', np.float64(-0.021616)), ('latency_spike', np.float64(-1.022516)), ('tier_critical', np.float64(-0.020798)), ('region_eu', np.float64(-0.533667)), ('maintenance_window', np.float64(0.193081)), ('retry_count', np.float64(0.1999)), ('service_age', np.float64(0.108632)), ('on_call_load', np.float64(-0.718535)), ('dup_alerts', np.float64(0.257315)), ('sensor_drift', np.float64(-0.510867)), ('aux_1', np.float64(0.20268)), ('aux_2', np.float64(-0.698742)), ('aux_3', np.float64(0.170316)), ('aux_4', np.float64(-0.34391)), ('aux_5', np.float64(-0.095473))] b= -0.04447940964317527
+13 [('impact', np.float64(0.063232)), ('urgency', np.float64(0.057099)), ('users_affected', np.float64(0.057036)), ('confidence', np.float64(0.052981)), ('error_rate', np.float64(0.101684)), ('latency_spike', np.float64(-0.028825)), ('tier_critical', np.float64(0.069873)), ('region_eu', np.float64(-0.002885)), ('maintenance_window', np.float64(-0.018426)), ('retry_count', np.float64(-0.989987)), ('service_age', np.float64(-0.930773)), ('on_call_load', np.float64(-0.030788)), ('dup_alerts', np.float64(0.004909)), ('sensor_drift', np.float64(-0.026417)), ('aux_1', np.float64(0.069156)), ('aux_2', np.float64(0.046683)), ('aux_3', np.float64(-0.017739)), ('aux_4', np.float64(0.001232)), ('aux_5', np.float64(0.029956))] b= 0.8317609646427345
+14 [('impact', np.float64(0.375221)), ('urgency', np.float64(0.470364)), ('users_affected', np.float64(0.711309)), ('confidence', np.float64(-0.539554)), ('error_rate', np.float64(0.603294)), ('latency_spike', np.float64(-0.191104)), ('tier_critical', np.float64(-0.104592)), ('region_eu', np.float64(-0.067267)), ('maintenance_window', np.float64(0.491811)), ('retry_count', np.float64(0.112546)), ('service_age', np.float64(-0.145053)), ('on_call_load', np.float64(-0.068699)), ('dup_alerts', np.float64(-0.02756)), ('sensor_drift', np.float64(0.261144)), ('aux_1', np.float64(0.187475)), ('aux_2', np.float64(-0.141045)), ('aux_3', np.float64(-0.096851)), ('aux_4', np.float64(0.48477)), ('aux_5', np.float64(0.044791))] b= -0.4562320363128084
+15 [('impact', np.float64(-0.362478)), ('urgency', np.float64(0.279384)), ('users_affected', np.float64(-0.208547)), ('confidence', np.float64(-0.089847)), ('error_rate', np.float64(0.166355)), ('latency_spike', np.float64(0.380157)), ('tier_critical', np.float64(-0.405571)), ('region_eu', np.float64(-0.28351)), ('maintenance_window', np.float64(0.031764)), ('retry_count', np.float64(0.339967)), ('service_age', np.float64(0.025591)), ('on_call_load', np.float64(0.235461)), ('dup_alerts', np.float64(-0.233359)), ('sensor_drift', np.float64(-0.091195)), ('aux_1', np.float64(0.591765)), ('aux_2', np.float64(-0.171815)), ('aux_3', np.float64(0.164796)), ('aux_4', np.float64(-0.006278)), ('aux_5', np.float64(0.035366))] b= 0.5513069197411959
+16 [('impact', np.float64(0.424244)), ('urgency', np.float64(0.212581)), ('users_affected', np.float64(0.360445)), ('confidence', np.float64(0.533692)), ('error_rate', np.float64(0.144164)), ('latency_spike', np.float64(0.120592)), ('tier_critical', np.float64(0.178573)), ('region_eu', np.float64(-0.093939)), ('maintenance_window', np.float64(-0.067113)), ('retry_count', np.float64(-0.180237)), ('service_age', np.float64(-0.243413)), ('on_call_load', np.float64(0.468136)), ('dup_alerts', np.float64(0.473617)), ('sensor_drift', np.float64(0.201511)), ('aux_1', np.float64(0.157886)), ('aux_2', np.float64(-0.027908)), ('aux_3', np.float64(-0.666241)), ('aux_4', np.float64(-0.136287)), ('aux_5', np.float64(0.485503))] b= -0.46154439139338377
+17 [('impact', np.float64(0.746163)), ('urgency', np.float64(0.512509)), ('users_affected', np.float64(0.489642)), ('confidence', np.float64(0.189264)), ('error_rate', np.float64(0.215197)), ('latency_spike', np.float64(0.635076)), ('tier_critical', np.float64(-0.059144)), ('region_eu', np.float64(0.04409)), ('maintenance_window', np.float64(-0.235346)), ('retry_count', np.float64(-0.031953)), ('service_age', np.float64(-0.24474)), ('on_call_load', np.float64(0.605562)), ('dup_alerts', np.float64(-0.404377)), ('sensor_drift', np.float64(0.242388)), ('aux_1', np.float64(0.227045)), ('aux_2', np.float64(0.263859)), ('aux_3', np.float64(-0.291938)), ('aux_4', np.float64(-0.209769)), ('aux_5', np.float64(0.429964))] b= -0.4832673838544812
+18 [('impact', np.float64(-0.088192)), ('urgency', np.float64(-0.026845)), ('users_affected', np.float64(-0.849374)), ('confidence', np.float64(0.099527)), ('error_rate', np.float64(0.779542)), ('latency_spike', np.float64(-0.210538)), ('tier_critical', np.float64(0.088295)), ('region_eu', np.float64(-0.085517)), ('maintenance_window', np.float64(-0.067141)), ('retry_count', np.float64(0.266371)), ('service_age', np.float64(0.494636)), ('on_call_load', np.float64(-0.366521)), ('dup_alerts', np.float64(-0.0287)), ('sensor_drift', np.float64(-0.136271)), ('aux_1', np.float64(0.107697)), ('aux_2', np.float64(0.282507)), ('aux_3', np.float64(-0.292508)), ('aux_4', np.float64(-0.012881)), ('aux_5', np.float64(-0.043175))] b= 0.371283645402087
+19 [('impact', np.float64(0.290017)), ('urgency', np.float64(0.408029)), ('users_affected', np.float64(-0.237151)), ('confidence', np.float64(0.030899)), ('error_rate', np.float64(-0.038697)), ('latency_spike', np.float64(-0.314817)), ('tier_critical', np.float64(-0.105043)), ('region_eu', np.float64(-0.146294)), ('maintenance_window', np.float64(-0.044274)), ('retry_count', np.float64(-1.016854)), ('service_age', np.float64(0.616504)), ('on_call_load', np.float64(0.036961)), ('dup_alerts', np.float64(0.192061)), ('sensor_drift', np.float64(0.005159)), ('aux_1', np.float64(-0.06838)), ('aux_2', np.float64(0.053504)), ('aux_3', np.float64(0.069105)), ('aux_4', np.float64(-0.087808)), ('aux_5', np.float64(-0.048181))] b= -0.10974531625479798
+20 [('impact', np.float64(0.116991)), ('urgency', np.float64(0.161294)), ('users_affected', np.float64(0.2718)), ('confidence', np.float64(0.483068)), ('error_rate', np.float64(0.045096)), ('latency_spike', np.float64(0.306716)), ('tier_critical', np.float64(-0.110377)), ('region_eu', np.float64(0.201255)), ('maintenance_window', np.float64(0.117509)), ('retry_count', np.float64(0.189153)), ('service_age', np.float64(0.406577)), ('on_call_load', np.float64(-0.295685)), ('dup_alerts', np.float64(-0.308711)), ('sensor_drift', np.float64(-0.007634)), ('aux_1', np.float64(-0.089099)), ('aux_2', np.float64(0.416184)), ('aux_3', np.float64(0.366465)), ('aux_4', np.float64(-0.072654)), ('aux_5', np.float64(-0.092866))] b= -0.40990000314005415
+21 [('impact', np.float64(0.09055)), ('urgency', np.float64(0.22902)), ('users_affected', np.float64(0.367924)), ('confidence', np.float64(0.082136)), ('error_rate', np.float64(0.416228)), ('latency_spike', np.float64(0.198507)), ('tier_critical', np.float64(0.46056)), ('region_eu', np.float64(-0.12854)), ('maintenance_window', np.float64(0.217889)), ('retry_count', np.float64(-0.183125)), ('service_age', np.float64(0.049704)), ('on_call_load', np.float64(-0.293741)), ('dup_alerts', np.float64(1.172709)), ('sensor_drift', np.float64(0.086194)), ('aux_1', np.float64(0.356892)), ('aux_2', np.float64(0.076289)), ('aux_3', np.float64(-0.245891)), ('aux_4', np.float64(0.202687)), ('aux_5', np.float64(-0.109152))] b= -0.46241008087230556
+22 [('impact', np.float64(0.229426)), ('urgency', np.float64(-0.368387)), ('users_affected', np.float64(-0.062112)), ('confidence', np.float64(-0.383627)), ('error_rate', np.float64(-0.106836)), ('latency_spike', np.float64(0.634693)), ('tier_critical', np.float64(-1.85533)), ('region_eu', np.float64(-0.065395)), ('maintenance_window', np.float64(-0.053945)), ('retry_count', np.float64(-0.255782)), ('service_age', np.float64(-0.000742)), ('on_call_load', np.float64(0.353523)), ('dup_alerts', np.float64(0.093468)), ('sensor_drift', np.float64(-0.116145)), ('aux_1', np.float64(0.21767)), ('aux_2', np.float64(0.156831)), ('aux_3', np.float64(-0.124503)), ('aux_4', np.float64(-0.06484)), ('aux_5', np.float64(0.108435))] b= 0.6719959366338993
+23 [('impact', np.float64(0.314808)), ('urgency', np.float64(0.832204)), ('users_affected', np.float64(0.270488)), ('confidence', np.float64(0.27756)), ('error_rate', np.float64(0.076607)), ('latency_spike', np.float64(-0.610439)), ('tier_critical', np.float64(-0.234211)), ('region_eu', np.float64(0.080842)), ('maintenance_window', np.float64(-0.186935)), ('retry_count', np.float64(-0.440526)), ('service_age', np.float64(0.021052)), ('on_call_load', np.float64(0.39922)), ('dup_alerts', np.float64(0.479484)), ('sensor_drift', np.float64(0.389155)), ('aux_1', np.float64(0.506181)), ('aux_2', np.float64(0.365168)), ('aux_3', np.float64(0.644652)), ('aux_4', np.float64(0.194793)), ('aux_5', np.float64(-0.577158))] b= -0.5126759618487109
+24 [('impact', np.float64(-0.499209)), ('urgency', np.float64(-0.001995)), ('users_affected', np.float64(0.239247)), ('confidence', np.float64(0.484657)), ('error_rate', np.float64(-0.175046)), ('latency_spike', np.float64(-0.244765)), ('tier_critical', np.float64(0.116944)), ('region_eu', np.float64(0.069608)), ('maintenance_window', np.float64(0.076767)), ('retry_count', np.float64(-0.04988)), ('service_age', np.float64(0.115707)), ('on_call_load', np.float64(-0.367303)), ('dup_alerts', np.float64(-0.458382)), ('sensor_drift', np.float64(-0.001012)), ('aux_1', np.float64(0.306136)), ('aux_2', np.float64(0.263935)), ('aux_3', np.float64(-0.153175)), ('aux_4', np.float64(-0.069084)), ('aux_5', np.float64(0.570848))] b= 0.618436550649414
+25 [('impact', np.float64(0.204408)), ('urgency', np.float64(-0.101266)), ('users_affected', np.float64(-0.116251)), ('confidence', np.float64(-0.161476)), ('error_rate', np.float64(-0.282078)), ('latency_spike', np.float64(0.33601)), ('tier_critical', np.float64(0.082113)), ('region_eu', np.float64(-0.022006)), ('maintenance_window', np.float64(-0.063795)), ('retry_count', np.float64(-1.189101)), ('service_age', np.float64(1.269629)), ('on_call_load', np.float64(0.105224)), ('dup_alerts', np.float64(-0.075011)), ('sensor_drift', np.float64(-0.068637)), ('aux_1', np.float64(0.005539)), ('aux_2', np.float64(0.140131)), ('aux_3', np.float64(0.123911)), ('aux_4', np.float64(-0.04146)), ('aux_5', np.float64(0.039112))] b= -0.0728709413215182
+26 [('impact', np.float64(-0.266333)), ('urgency', np.float64(0.004612)), ('users_affected', np.float64(-0.863457)), ('confidence', np.float64(-0.008712)), ('error_rate', np.float64(0.697922)), ('latency_spike', np.float64(-0.482121)), ('tier_critical', np.float64(0.373746)), ('region_eu', np.float64(-0.17619)), ('maintenance_window', np.float64(-0.119992)), ('retry_count', np.float64(0.027392)), ('service_age', np.float64(-0.19465)), ('on_call_load', np.float64(0.0441)), ('dup_alerts', np.float64(-0.02266)), ('sensor_drift', np.float64(0.357326)), ('aux_1', np.float64(0.201817)), ('aux_2', np.float64(0.071096)), ('aux_3', np.float64(-0.042052)), ('aux_4', np.float64(-0.317152)), ('aux_5', np.float64(0.063074))] b= 0.4450350348696154
+27 [('impact', np.float64(-0.245986)), ('urgency', np.float64(-0.391576)), ('users_affected', np.float64(-0.362263)), ('confidence', np.float64(-0.128426)), ('error_rate', np.float64(0.256568)), ('latency_spike', np.float64(0.06066)), ('tier_critical', np.float64(-0.239424)), ('region_eu', np.float64(-0.422466)), ('maintenance_window', np.float64(0.510894)), ('retry_count', np.float64(0.002302)), ('service_age', np.float64(0.010794)), ('on_call_load', np.float64(0.377613)), ('dup_alerts', np.float64(0.366442)), ('sensor_drift', np.float64(-0.242336)), ('aux_1', np.float64(-0.309013)), ('aux_2', np.float64(0.144098)), ('aux_3', np.float64(-0.028544)), ('aux_4', np.float64(-0.424959)), ('aux_5', np.float64(0.194702))] b= 0.5207903304664457
+28 [('impact', np.float64(-0.542281)), ('urgency', np.float64(-0.229605)), ('users_affected', np.float64(0.1116)), ('confidence', np.float64(-0.259291)), ('error_rate', np.float64(-0.133696)), ('latency_spike', np.float64(-0.623176)), ('tier_critical', np.float64(0.074139)), ('region_eu', np.float64(0.316477)), ('maintenance_window', np.float64(-0.032287)), ('retry_count', np.float64(0.318381)), ('service_age', np.float64(0.046783)), ('on_call_load', np.float64(0.132802)), ('dup_alerts', np.float64(0.057858)), ('sensor_drift', np.float64(0.267412)), ('aux_1', np.float64(0.320208)), ('aux_2', np.float64(0.450524)), ('aux_3', np.float64(0.064557)), ('aux_4', np.float64(0.092138)), ('aux_5', np.float64(0.210079))] b= 0.675262247152998
+29 [('impact', np.float64(0.329229)), ('urgency', np.float64(0.404003)), ('users_affected', np.float64(0.440131)), ('confidence', np.float64(0.204332)), ('error_rate', np.float64(0.183497)), ('latency_spike', np.float64(0.056246)), ('tier_critical', np.float64(0.42303)), ('region_eu', np.float64(0.666892)), ('maintenance_window', np.float64(0.280473)), ('retry_count', np.float64(0.241195)), ('service_age', np.float64(0.680213)), ('on_call_load', np.float64(-0.689191)), ('dup_alerts', np.float64(-0.140122)), ('sensor_drift', np.float64(-0.26767)), ('aux_1', np.float64(0.269167)), ('aux_2', np.float64(0.123019)), ('aux_3', np.float64(0.203962)), ('aux_4', np.float64(0.385336)), ('aux_5', np.float64(0.146464))] b= -0.5028856990783023
+30 [('impact', np.float64(-0.223086)), ('urgency', np.float64(-0.410426)), ('users_affected', np.float64(-0.434403)), ('confidence', np.float64(-0.050718)), ('error_rate', np.float64(-0.293631)), ('latency_spike', np.float64(0.093079)), ('tier_critical', np.float64(-0.224444)), ('region_eu', np.float64(-0.173391)), ('maintenance_window', np.float64(0.202861)), ('retry_count', np.float64(0.414247)), ('service_age', np.float64(0.166202)), ('on_call_load', np.float64(0.069331)), ('dup_alerts', np.float64(0.090434)), ('sensor_drift', np.float64(0.509056)), ('aux_1', np.float64(-0.049679)), ('aux_2', np.float64(-0.160121)), ('aux_3', np.float64(0.266384)), ('aux_4', np.float64(0.264204)), ('aux_5', np.float64(0.711673))] b= 0.5852053208937554
+31 [('impact', np.float64(0.417364)), ('urgency', np.float64(0.282901)), ('users_affected', np.float64(-0.789815)), ('confidence', np.float64(-0.088105)), ('error_rate', np.float64(-0.644392)), ('latency_spike', np.float64(0.070929)), ('tier_critical', np.float64(0.078786)), ('region_eu', np.float64(-0.015707)), ('maintenance_window', np.float64(-0.058225)), ('retry_count', np.float64(0.823423)), ('service_age', np.float64(-0.937335)), ('on_call_load', np.float64(0.074738)), ('dup_alerts', np.float64(0.14522)), ('sensor_drift', np.float64(-0.008166)), ('aux_1', np.float64(-0.015139)), ('aux_2', np.float64(0.095004)), ('aux_3', np.float64(0.253302)), ('aux_4', np.float64(0.051089)), ('aux_5', np.float64(-0.106412))] b= 0.07982889994395251
+32 [('impact', np.float64(0.105154)), ('urgency', np.float64(-0.412915)), ('users_affected', np.float64(-0.565941)), ('confidence', np.float64(0.278508)), ('error_rate', np.float64(0.04163)), ('latency_spike', np.float64(0.572682)), ('tier_critical', np.float64(-1.272122)), ('region_eu', np.float64(-0.133283)), ('maintenance_window', np.float64(-0.157063)), ('retry_count', np.float64(0.276809)), ('service_age', np.float64(-0.04886)), ('on_call_load', np.float64(-0.192753)), ('dup_alerts', np.float64(-0.066043)), ('sensor_drift', np.float64(0.417591)), ('aux_1', np.float64(-0.118155)), ('aux_2', np.float64(-0.203669)), ('aux_3', np.float64(-0.140657)), ('aux_4', np.float64(0.444854)), ('aux_5', np.float64(-0.011724))] b= 0.5453935061509575
+33 [('impact', np.float64(1.021159)), ('urgency', np.float64(0.181715)), ('users_affected', np.float64(-0.359973)), ('confidence', np.float64(0.147613)), ('error_rate', np.float64(-0.023124)), ('latency_spike', np.float64(0.4356)), ('tier_critical', np.float64(-0.154665)), ('region_eu', np.float64(0.123359)), ('maintenance_window', np.float64(-0.004999)), ('retry_count', np.float64(0.250668)), ('service_age', np.float64(-0.187757)), ('on_call_load', np.float64(0.052924)), ('dup_alerts', np.float64(0.236789)), ('sensor_drift', np.float64(-0.101357)), ('aux_1', np.float64(0.291056)), ('aux_2', np.float64(-0.256005)), ('aux_3', np.float64(-0.323415)), ('aux_4', np.float64(0.164217)), ('aux_5', np.float64(0.612006))] b= -0.376959230762159
+34 [('impact', np.float64(0.367539)), ('urgency', np.float64(0.114269)), ('users_affected', np.float64(0.161109)), ('confidence', np.float64(0.258374)), ('error_rate', np.float64(0.177722)), ('latency_spike', np.float64(-0.170299)), ('tier_critical', np.float64(0.832491)), ('region_eu', np.float64(0.330083)), ('maintenance_window', np.float64(-0.009429)), ('retry_count', np.float64(-0.323999)), ('service_age', np.float64(0.552146)), ('on_call_load', np.float64(0.110917)), ('dup_alerts', np.float64(-0.093129)), ('sensor_drift', np.float64(0.050169)), ('aux_1', np.float64(-0.289633)), ('aux_2', np.float64(0.164237)), ('aux_3', np.float64(-0.079014)), ('aux_4', np.float64(0.373647)), ('aux_5', np.float64(0.103757))] b= -0.5380955233120487
+35 [('impact', np.float64(-0.161882)), ('urgency', np.float64(-0.253917)), ('users_affected', np.float64(-0.106546)), ('confidence', np.float64(-0.084236)), ('error_rate', np.float64(-0.196508)), ('latency_spike', np.float64(-1.332025)), ('tier_critical', np.float64(1.338727)), ('region_eu', np.float64(-0.0091)), ('maintenance_window', np.float64(0.045608)), ('retry_count', np.float64(0.090508)), ('service_age', np.float64(0.050059)), ('on_call_load', np.float64(0.114356)), ('dup_alerts', np.float64(-0.200085)), ('sensor_drift', np.float64(0.103356)), ('aux_1', np.float64(-0.055695)), ('aux_2', np.float64(-0.03696)), ('aux_3', np.float64(0.077475)), ('aux_4', np.float64(-0.009647)), ('aux_5', np.float64(0.089913))] b= 0.2907156957551455
+36 [('impact', np.float64(-0.278935)), ('urgency', np.float64(-0.013009)), ('users_affected', np.float64(0.331046)), ('confidence', np.float64(-0.268557)), ('error_rate', np.float64(-0.469277)), ('latency_spike', np.float64(-0.055002)), ('tier_critical', np.float64(0.162825)), ('region_eu', np.float64(0.032224)), ('maintenance_window', np.float64(0.364033)), ('retry_count', np.float64(0.093762)), ('service_age', np.float64(0.434972)), ('on_call_load', np.float64(0.155155)), ('dup_alerts', np.float64(0.280004)), ('sensor_drift', np.float64(0.351396)), ('aux_1', np.float64(-0.08755)), ('aux_2', np.float64(0.492905)), ('aux_3', np.float64(-0.198035)), ('aux_4', np.float64(0.195655)), ('aux_5', np.float64(-0.349091))] b= 0.7206215275661574
+37 [('impact', np.float64(-0.320086)), ('urgency', np.float64(-0.25958)), ('users_affected', np.float64(-0.791758)), ('confidence', np.float64(0.016356)), ('error_rate', np.float64(0.644988)), ('latency_spike', np.float64(-0.233379)), ('tier_critical', np.float64(0.278105)), ('region_eu', np.float64(-0.080577)), ('maintenance_window', np.float64(-0.252623)), ('retry_count', np.float64(0.09136)), ('service_age', np.float64(0.246145)), ('on_call_load', np.float64(-0.085187)), ('dup_alerts', np.float64(0.038401)), ('sensor_drift', np.float64(-0.182828)), ('aux_1', np.float64(0.057048)), ('aux_2', np.float64(0.063715)), ('aux_3', np.float64(0.401725)), ('aux_4', np.float64(-0.020841)), ('aux_5', np.float64(-0.032264))] b= 0.6324951763645815
+38 [('impact', np.float64(0.900451)), ('urgency', np.float64(0.674345)), ('users_affected', np.float64(0.742101)), ('confidence', np.float64(-0.436877)), ('error_rate', np.float64(-0.003805)), ('latency_spike', np.float64(-0.045439)), ('tier_critical', np.float64(0.674547)), ('region_eu', np.float64(0.311909)), ('maintenance_window', np.float64(0.496553)), ('retry_count', np.float64(0.341318)), ('service_age', np.float64(0.187342)), ('on_call_load', np.float64(0.194095)), ('dup_alerts', np.float64(0.207011)), ('sensor_drift', np.float64(-0.076465)), ('aux_1', np.float64(-0.077486)), ('aux_2', np.float64(0.033054)), ('aux_3', np.float64(0.302945)), ('aux_4', np.float64(0.203111)), ('aux_5', np.float64(-0.100927))] b= -0.4112163648520738
+39 [('impact', np.float64(0.294529)), ('urgency', np.float64(-0.065895)), ('users_affected', np.float64(0.317044)), ('confidence', np.float64(-0.02433)), ('error_rate', np.float64(0.498441)), ('latency_spike', np.float64(0.097304)), ('tier_critical', np.float64(-0.17935)), ('region_eu', np.float64(0.178027)), ('maintenance_window', np.float64(0.611838)), ('retry_count', np.float64(-0.091438)), ('service_age', np.float64(-0.183305)), ('on_call_load', np.float64(0.23169)), ('dup_alerts', np.float64(0.508559)), ('sensor_drift', np.float64(0.116971)), ('aux_1', np.float64(-0.333405)), ('aux_2', np.float64(-0.150985)), ('aux_3', np.float64(0.389308)), ('aux_4', np.float64(0.094502)), ('aux_5', np.float64(0.422839))] b= -0.5177158936941513
+40 [('impact', np.float64(0.307827)), ('urgency', np.float64(1.093369)), ('users_affected', np.float64(0.261663)), ('confidence', np.float64(-0.304935)), ('error_rate', np.float64(0.954806)), ('latency_spike', np.float64(0.198218)), ('tier_critical', np.float64(-0.244402)), ('region_eu', np.float64(0.00144)), ('maintenance_window', np.float64(-0.163748)), ('retry_count', np.float64(0.426072)), ('service_age', np.float64(0.333835)), ('on_call_load', np.float64(0.393398)), ('dup_alerts', np.float64(-0.566566)), ('sensor_drift', np.float64(0.541152)), ('aux_1', np.float64(0.596217)), ('aux_2', np.float64(-0.115458)), ('aux_3', np.float64(-0.255655)), ('aux_4', np.float64(0.091647)), ('aux_5', np.float64(0.351929))] b= -0.47514183231263135
+41 [('impact', np.float64(-0.348948)), ('urgency', np.float64(-0.611532)), ('users_affected', np.float64(0.290667)), ('confidence', np.float64(0.161479)), ('error_rate', np.float64(-0.157097)), ('latency_spike', np.float64(-0.174058)), ('tier_critical', np.float64(-0.500317)), ('region_eu', np.float64(0.208217)), ('maintenance_window', np.float64(0.098478)), ('retry_count', np.float64(-0.912659)), ('service_age', np.float64(-0.327468)), ('on_call_load', np.float64(0.511468)), ('dup_alerts', np.float64(0.309254)), ('sensor_drift', np.float64(-1.020483)), ('aux_1', np.float64(-0.451497)), ('aux_2', np.float64(-0.1511)), ('aux_3', np.float64(-0.071371)), ('aux_4', np.float64(-0.270203)), ('aux_5', np.float64(-0.022012))] b= -0.04785301221368192
+42 [('impact', np.float64(-0.553177)), ('urgency', np.float64(0.087143)), ('users_affected', np.float64(-0.051709)), ('confidence', np.float64(-0.141519)), ('error_rate', np.float64(-0.09437)), ('latency_spike', np.float64(-0.189272)), ('tier_critical', np.float64(-0.364917)), ('region_eu', np.float64(-0.328863)), ('maintenance_window', np.float64(0.003571)), ('retry_count', np.float64(0.02397)), ('service_age', np.float64(-0.46705)), ('on_call_load', np.float64(0.128839)), ('dup_alerts', np.float64(0.088973)), ('sensor_drift', np.float64(-0.215466)), ('aux_1', np.float64(0.27068)), ('aux_2', np.float64(0.380303)), ('aux_3', np.float64(0.000331)), ('aux_4', np.float64(0.0518)), ('aux_5', np.float64(0.168311))] b= 0.534528015139141
+43 [('impact', np.float64(0.445687)), ('urgency', np.float64(0.416282)), ('users_affected', np.float64(-1.106766)), ('confidence', np.float64(-0.048935)), ('error_rate', np.float64(-0.218554)), ('latency_spike', np.float64(-0.450852)), ('tier_critical', np.float64(-0.67547)), ('region_eu', np.float64(0.160068)), ('maintenance_window', np.float64(-0.188044)), ('retry_count', np.float64(-0.228193)), ('service_age', np.float64(0.989141)), ('on_call_load', np.float64(0.250572)), ('dup_alerts', np.float64(0.376271)), ('sensor_drift', np.float64(-0.026514)), ('aux_1', np.float64(-0.230707)), ('aux_2', np.float64(-0.331506)), ('aux_3', np.float64(-0.173351)), ('aux_4', np.float64(0.162815)), ('aux_5', np.float64(-0.174615))] b= -0.013587893457386405
+44 [('impact', np.float64(-0.514685)), ('urgency', np.float64(0.747099)), ('users_affected', np.float64(0.716851)), ('confidence', np.float64(0.269068)), ('error_rate', np.float64(0.394962)), ('latency_spike', np.float64(0.380138)), ('tier_critical', np.float64(0.232084)), ('region_eu', np.float64(-0.218597)), ('maintenance_window', np.float64(-0.26021)), ('retry_count', np.float64(-0.075864)), ('service_age', np.float64(-0.033989)), ('on_call_load', np.float64(0.117909)), ('dup_alerts', np.float64(0.577788)), ('sensor_drift', np.float64(-0.136413)), ('aux_1', np.float64(0.341631)), ('aux_2', np.float64(-0.187527)), ('aux_3', np.float64(0.382448)), ('aux_4', np.float64(-0.102831)), ('aux_5', np.float64(0.39873))] b= -0.4702990366719511
+45 [('impact', np.float64(-0.548699)), ('urgency', np.float64(-0.455327)), ('users_affected', np.float64(-0.096412)), ('confidence', np.float64(0.212505)), ('error_rate', np.float64(0.106859)), ('latency_spike', np.float64(0.479591)), ('tier_critical', np.float64(-0.836002)), ('region_eu', np.float64(0.235389)), ('maintenance_window', np.float64(-0.107744)), ('retry_count', np.float64(-0.177131)), ('service_age', np.float64(0.079025)), ('on_call_load', np.float64(0.196908)), ('dup_alerts', np.float64(0.336567)), ('sensor_drift', np.float64(-0.190557)), ('aux_1', np.float64(-0.033366)), ('aux_2', np.float64(-0.002899)), ('aux_3', np.float64(0.469928)), ('aux_4', np.float64(0.062077)), ('aux_5', np.float64(0.206299))] b= 0.6190802551181749
+46 [('impact', np.float64(-0.273818)), ('urgency', np.float64(0.532918)), ('users_affected', np.float64(0.156846)), ('confidence', np.float64(-0.03291)), ('error_rate', np.float64(-0.491726)), ('latency_spike', np.float64(0.640395)), ('tier_critical', np.float64(-1.768188)), ('region_eu', np.float64(0.063946)), ('maintenance_window', np.float64(-0.057487)), ('retry_count', np.float64(0.157568)), ('service_age', np.float64(0.002326)), ('on_call_load', np.float64(0.027517)), ('dup_alerts', np.float64(0.049092)), ('sensor_drift', np.float64(0.073584)), ('aux_1', np.float64(-0.242022)), ('aux_2', np.float64(0.028287)), ('aux_3', np.float64(-0.073873)), ('aux_4', np.float64(-0.238928)), ('aux_5', np.float64(-0.16702))] b= 0.6983168520799786
+47 [('impact', np.float64(0.763713)), ('urgency', np.float64(0.695141)), ('users_affected', np.float64(-0.567921)), ('confidence', np.float64(0.074872)), ('error_rate', np.float64(-0.766035)), ('latency_spike', np.float64(-0.7169)), ('tier_critical', np.float64(-0.595852)), ('region_eu', np.float64(0.053372)), ('maintenance_window', np.float64(0.01723)), ('retry_count', np.float64(-0.360653)), ('service_age', np.float64(-0.13615)), ('on_call_load', np.float64(-0.07414)), ('dup_alerts', np.float64(0.247449)), ('sensor_drift', np.float64(0.034358)), ('aux_1', np.float64(0.378777)), ('aux_2', np.float64(0.180928)), ('aux_3', np.float64(-0.167429)), ('aux_4', np.float64(-0.051699)), ('aux_5', np.float64(0.204472))] b= 0.10658186480455635
+48 [('impact', np.float64(-0.058709)), ('urgency', np.float64(-0.271236)), ('users_affected', np.float64(-1.083465)), ('confidence', np.float64(0.267161)), ('error_rate', np.float64(0.88824)), ('latency_spike', np.float64(0.218157)), ('tier_critical', np.float64(-0.197325)), ('region_eu', np.float64(0.767258)), ('maintenance_window', np.float64(-0.013597)), ('retry_count', np.float64(-0.346688)), ('service_age', np.float64(-0.277522)), ('on_call_load', np.float64(0.237005)), ('dup_alerts', np.float64(-0.655338)), ('sensor_drift', np.float64(-0.05413)), ('aux_1', np.float64(-0.334406)), ('aux_2', np.float64(0.245873)), ('aux_3', np.float64(0.108368)), ('aux_4', np.float64(-0.353981)), ('aux_5', np.float64(-0.064693))] b= 0.39761963495691155
+49 [('impact', np.float64(-0.291118)), ('urgency', np.float64(0.302251)), ('users_affected', np.float64(-0.417268)), ('confidence', np.float64(0.204652)), ('error_rate', np.float64(0.125417)), ('latency_spike', np.float64(-0.49159)), ('tier_critical', np.float64(0.385413)), ('region_eu', np.float64(-0.236822)), ('maintenance_window', np.float64(0.442212)), ('retry_count', np.float64(0.152718)), ('service_age', np.float64(0.148654)), ('on_call_load', np.float64(0.161169)), ('dup_alerts', np.float64(-0.228557)), ('sensor_drift', np.float64(-0.136996)), ('aux_1', np.float64(-0.175086)), ('aux_2', np.float64(-0.075742)), ('aux_3', np.float64(0.019336)), ('aux_4', np.float64(0.1644)), ('aux_5', np.float64(0.326161))] b= 0.5175518103642349
+50 [('impact', np.float64(-0.133674)), ('urgency', np.float64(0.49572)), ('users_affected', np.float64(-0.193811)), ('confidence', np.float64(0.089832)), ('error_rate', np.float64(-0.744178)), ('latency_spike', np.float64(-0.402978)), ('tier_critical', np.float64(-0.556025)), ('region_eu', np.float64(-0.142355)), ('maintenance_window', np.float64(-0.209852)), ('retry_count', np.float64(0.127016)), ('service_age', np.float64(0.379991)), ('on_call_load', np.float64(-0.010609)), ('dup_alerts', np.float64(-0.149221)), ('sensor_drift', np.float64(0.052259)), ('aux_1', np.float64(0.113539)), ('aux_2', np.float64(-0.196735)), ('aux_3', np.float64(-0.030972)), ('aux_4', np.float64(0.327265)), ('aux_5', np.float64(0.416915))] b= 0.5268444998560582
+51 [('impact', np.float64(0.547949)), ('urgency', np.float64(0.467389)), ('users_affected', np.float64(0.115483)), ('confidence', np.float64(0.034351)), ('error_rate', np.float64(0.154229)), ('latency_spike', np.float64(-0.231142)), ('tier_critical', np.float64(-0.442684)), ('region_eu', np.float64(0.027641)), ('maintenance_window', np.float64(0.152346)), ('retry_count', np.float64(0.001704)), ('service_age', np.float64(0.32784)), ('on_call_load', np.float64(0.055487)), ('dup_alerts', np.float64(-0.363547)), ('sensor_drift', np.float64(-0.285276)), ('aux_1', np.float64(-0.673053)), ('aux_2', np.float64(0.045115)), ('aux_3', np.float64(-0.26668)), ('aux_4', np.float64(0.170402)), ('aux_5', np.float64(-0.535673))] b= -0.03197024073481613
+52 [('impact', np.float64(-0.220675)), ('urgency', np.float64(-0.103224)), ('users_affected', np.float64(-0.230464)), ('confidence', np.float64(-0.012186)), ('error_rate', np.float64(-0.59135)), ('latency_spike', np.float64(0.054114)), ('tier_critical', np.float64(-0.057018)), ('region_eu', np.float64(0.350123)), ('maintenance_window', np.float64(0.73475)), ('retry_count', np.float64(0.216713)), ('service_age', np.float64(0.403202)), ('on_call_load', np.float64(0.293924)), ('dup_alerts', np.float64(0.069632)), ('sensor_drift', np.float64(-0.446578)), ('aux_1', np.float64(0.095932)), ('aux_2', np.float64(0.184069)), ('aux_3', np.float64(0.082137)), ('aux_4', np.float64(0.029189)), ('aux_5', np.float64(0.234857))] b= 0.6454977891360371
+53 [('impact', np.float64(0.424806)), ('urgency', np.float64(0.501477)), ('users_affected', np.float64(0.78334)), ('confidence', np.float64(0.675385)), ('error_rate', np.float64(-0.004934)), ('latency_spike', np.float64(0.122995)), ('tier_critical', np.float64(-0.359391)), ('region_eu', np.float64(-0.263848)), ('maintenance_window', np.float64(0.661577)), ('retry_count', np.float64(-0.229288)), ('service_age', np.float64(0.154472)), ('on_call_load', np.float64(0.331991)), ('dup_alerts', np.float64(0.460699)), ('sensor_drift', np.float64(-0.190648)), ('aux_1', np.float64(-0.26991)), ('aux_2', np.float64(0.225948)), ('aux_3', np.float64(0.231609)), ('aux_4', np.float64(-0.212344)), ('aux_5', np.float64(0.546987))] b= -0.41844609643195196
+54 [('impact', np.float64(-0.761739)), ('urgency', np.float64(0.635463)), ('users_affected', np.float64(-0.620095)), ('confidence', np.float64(-0.131255)), ('error_rate', np.float64(0.063938)), ('latency_spike', np.float64(-0.162573)), ('tier_critical', np.float64(0.065094)), ('region_eu', np.float64(0.085643)), ('maintenance_window', np.float64(-0.035749)), ('retry_count', np.float64(0.352661)), ('service_age', np.float64(0.568249)), ('on_call_load', np.float64(0.089332)), ('dup_alerts', np.float64(0.248101)), ('sensor_drift', np.float64(-0.08998)), ('aux_1', np.float64(0.177606)), ('aux_2', np.float64(-0.052856)), ('aux_3', np.float64(0.055677)), ('aux_4', np.float64(0.088108)), ('aux_5', np.float64(0.561785))] b= 0.683555321008547
+55 [('impact', np.float64(-0.225337)), ('urgency', np.float64(-0.199444)), ('users_affected', np.float64(0.449861)), ('confidence', np.float64(-0.099785)), ('error_rate', np.float64(-0.680369)), ('latency_spike', np.float64(-0.299907)), ('tier_critical', np.float64(0.27375)), ('region_eu', np.float64(0.263719)), ('maintenance_window', np.float64(0.380547)), ('retry_count', np.float64(-0.267417)), ('service_age', np.float64(-0.296954)), ('on_call_load', np.float64(-0.04095)), ('dup_alerts', np.float64(0.219993)), ('sensor_drift', np.float64(0.117787)), ('aux_1', np.float64(-0.173109)), ('aux_2', np.float64(-0.03885)), ('aux_3', np.float64(0.492611)), ('aux_4', np.float64(-0.039953)), ('aux_5', np.float64(-0.224133))] b= 0.5494042705532474
+56 [('impact', np.float64(0.012168)), ('urgency', np.float64(0.122565)), ('users_affected', np.float64(0.294351)), ('confidence', np.float64(-0.094492)), ('error_rate', np.float64(-0.538245)), ('latency_spike', np.float64(-0.089928)), ('tier_critical', np.float64(-0.461886)), ('region_eu', np.float64(0.372982)), ('maintenance_window', np.float64(-0.343954)), ('retry_count', np.float64(-0.168352)), ('service_age', np.float64(-0.009911)), ('on_call_load', np.float64(-0.303427)), ('dup_alerts', np.float64(-0.022627)), ('sensor_drift', np.float64(0.165645)), ('aux_1', np.float64(-0.431819)), ('aux_2', np.float64(0.038883)), ('aux_3', np.float64(-0.305762)), ('aux_4', np.float64(0.152504)), ('aux_5', np.float64(0.428616))] b= 0.5239498040767909
+57 [('impact', np.float64(-0.32582)), ('urgency', np.float64(-0.122254)), ('users_affected', np.float64(-0.316897)), ('confidence', np.float64(-0.19453)), ('error_rate', np.float64(-0.126074)), ('latency_spike', np.float64(0.031053)), ('tier_critical', np.float64(-0.036989)), ('region_eu', np.float64(0.156955)), ('maintenance_window', np.float64(0.619149)), ('retry_count', np.float64(0.211927)), ('service_age', np.float64(0.139225)), ('on_call_load', np.float64(0.290578)), ('dup_alerts', np.float64(-0.298714)), ('sensor_drift', np.float64(-0.032164)), ('aux_1', np.float64(-0.090049)), ('aux_2', np.float64(0.061827)), ('aux_3', np.float64(0.238225)), ('aux_4', np.float64(0.407426)), ('aux_5', np.float64(0.753386))] b= 0.625143570630506
+58 [('impact', np.float64(-0.191188)), ('urgency', np.float64(-0.810544)), ('users_affected', np.float64(-0.918258)), ('confidence', np.float64(0.224358)), ('error_rate', np.float64(0.393178)), ('latency_spike', np.float64(-0.007216)), ('tier_critical', np.float64(0.342644)), ('region_eu', np.float64(0.432962)), ('maintenance_window', np.float64(0.102424)), ('retry_count', np.float64(0.380198)), ('service_age', np.float64(0.605496)), ('on_call_load', np.float64(0.567645)), ('dup_alerts', np.float64(0.09604)), ('sensor_drift', np.float64(-0.203504)), ('aux_1', np.float64(-0.156298)), ('aux_2', np.float64(0.264425)), ('aux_3', np.float64(-0.713834)), ('aux_4', np.float64(-0.083807)), ('aux_5', np.float64(-0.059176))] b= 0.4296974033686678
+59 [('impact', np.float64(-0.453066)), ('urgency', np.float64(-0.172144)), ('users_affected', np.float64(-0.339761)), ('confidence', np.float64(0.297725)), ('error_rate', np.float64(-0.119365)), ('latency_spike', np.float64(0.357784)), ('tier_critical', np.float64(-0.280587)), ('region_eu', np.float64(-0.044352)), ('maintenance_window', np.float64(0.290117)), ('retry_count', np.float64(0.234862)), ('service_age', np.float64(0.358942)), ('on_call_load', np.float64(0.023532)), ('dup_alerts', np.float64(-0.29821)), ('sensor_drift', np.float64(0.183834)), ('aux_1', np.float64(0.321102)), ('aux_2', np.float64(0.068135)), ('aux_3', np.float64(0.248622)), ('aux_4', np.float64(-0.028273)), ('aux_5', np.float64(-0.249796))] b= 0.6399794385632118
+60 [('impact', np.float64(-0.491637)), ('urgency', np.float64(-0.467674)), ('users_affected', np.float64(0.05241)), ('confidence', np.float64(-0.345024)), ('error_rate', np.float64(0.12684)), ('latency_spike', np.float64(0.209877)), ('tier_critical', np.float64(-0.21517)), ('region_eu', np.float64(0.097265)), ('maintenance_window', np.float64(0.057738)), ('retry_count', np.float64(0.242048)), ('service_age', np.float64(0.701469)), ('on_call_load', np.float64(-0.055498)), ('dup_alerts', np.float64(0.131583)), ('sensor_drift', np.float64(0.489728)), ('aux_1', np.float64(-0.229398)), ('aux_2', np.float64(0.069834)), ('aux_3', np.float64(0.16375)), ('aux_4', np.float64(0.096319)), ('aux_5', np.float64(-0.016432))] b= 0.4676483077023216
+61 [('impact', np.float64(-0.330275)), ('urgency', np.float64(-0.239153)), ('users_affected', np.float64(0.497477)), ('confidence', np.float64(-0.047803)), ('error_rate', np.float64(-0.86334)), ('latency_spike', np.float64(-0.154539)), ('tier_critical', np.float64(-0.000125)), ('region_eu', np.float64(0.375369)), ('maintenance_window', np.float64(-0.025711)), ('retry_count', np.float64(0.293793)), ('service_age', np.float64(0.167418)), ('on_call_load', np.float64(-0.057731)), ('dup_alerts', np.float64(-0.066976)), ('sensor_drift', np.float64(-0.001368)), ('aux_1', np.float64(0.132545)), ('aux_2', np.float64(0.010184)), ('aux_3', np.float64(-0.07073)), ('aux_4', np.float64(-0.039577)), ('aux_5', np.float64(0.019713))] b= 0.4704555100403988
+62 [('impact', np.float64(-0.048342)), ('urgency', np.float64(-0.071477)), ('users_affected', np.float64(-0.313832)), ('confidence', np.float64(0.147114)), ('error_rate', np.float64(-0.065982)), ('latency_spike', np.float64(0.384367)), ('tier_critical', np.float64(-1.51642)), ('region_eu', np.float64(0.060711)), ('maintenance_window', np.float64(0.188659)), ('retry_count', np.float64(0.192287)), ('service_age', np.float64(0.07775)), ('on_call_load', np.float64(-0.057227)), ('dup_alerts', np.float64(-0.635583)), ('sensor_drift', np.float64(0.098358)), ('aux_1', np.float64(-0.053152)), ('aux_2', np.float64(0.061672)), ('aux_3', np.float64(0.226161)), ('aux_4', np.float64(-0.054641)), ('aux_5', np.float64(0.106823))] b= 0.5528702528100242
+63 [('impact', np.float64(-0.210508)), ('urgency', np.float64(-0.13199)), ('users_affected', np.float64(-0.921696)), ('confidence', np.float64(0.048592)), ('error_rate', np.float64(0.690159)), ('latency_spike', np.float64(0.105844)), ('tier_critical', np.float64(-0.474183)), ('region_eu', np.float64(0.147711)), ('maintenance_window', np.float64(0.110878)), ('retry_count', np.float64(0.202601)), ('service_age', np.float64(0.142178)), ('on_call_load', np.float64(-0.077715)), ('dup_alerts', np.float64(0.02726)), ('sensor_drift', np.float64(-0.002284)), ('aux_1', np.float64(0.109727)), ('aux_2', np.float64(-0.196183)), ('aux_3', np.float64(-0.013667)), ('aux_4', np.float64(-0.097273)), ('aux_5', np.float64(-0.05534))] b= 0.59516416357344
+Layer 1 shape (64, 64) bias [-0.1858223  -0.36245275 -0.35024018  0.46859505 -0.3894317   0.46141364
+  0.48359564 -0.38918463 -0.38792323  0.57571744  0.37029749  0.49810439
+  0.49301418  0.51074036  0.45573759  0.37974466 -0.02370381  0.42904324
+ -0.3489075  -0.34145643 -0.133217    0.47895634 -0.42602708  0.47454883
+  0.48271997 -0.40463509 -0.38531668  0.49455011  0.45701112 -0.36123906
+  0.63144963  0.40451839 -0.35848957 -0.01163308  0.50741002 -0.41372938
+  0.46262695  0.47019095  0.42074849 -0.13359942 -0.36826513  0.45188746
+ -0.28974125 -0.39326159  0.52062375 -0.40333476  0.44276334 -0.4170141
+  0.4566699   0.50185703  0.50779494  0.48809883 -0.38022465  0.50049245
+  0.60778892 -0.36015426  0.52690242 -0.02375552  0.52397334  0.54220836
+ -0.37852401 -0.01724784  0.4478156   0.11746666] nonzero 4096
+[[-0.01922069  0.15585714  0.19717767 ... -0.09418539  0.07379921
+   0.03120798]
+ [ 0.39998217  0.26480254  0.45646719 ...  0.07169094 -0.27511293
+   0.09259527]
+ [ 0.17793714 -0.22736343 -0.07219366 ... -0.0260104  -0.05451392
+   0.45889023]
+ ...
+ [-0.2041153  -0.47381387 -0.53951303 ... -0.13852998  0.41484614
+   0.44643768]
+ [-0.2719439  -0.2951502  -0.2090672  ... -0.12940925  0.28677254
+  -0.68874969]
+ [-0.1896377  -0.17995099 -0.54984653 ...  0.26327562  0.42839174
+  -0.28737286]]
+Layer 2 shape (64, 1) bias [-0.3600768] nonzero 64
+[[ 0.8516386 ]
+ [ 0.99720146]
+ [ 0.5739968 ]
+ [-0.79117144]
+ [ 0.50194389]
+ [-0.49933932]
+ [-0.5386096 ]
+ [ 0.97073285]
+ [ 0.79732325]
+ [-0.69061033]
+ [-1.50493998]
+ [-0.42083929]
+ [-0.63460551]
+ [-0.50577926]
+ [-0.41469206]
+ [-0.10340201]
+ [ 0.02002281]
+ [-0.78800814]
+ [ 0.61051407]
+ [ 0.91933482]
+ [ 2.13669669]
+ [-0.63955717]
+ [ 0.43595825]
+ [-0.63205583]
+ [-0.56536972]
+ [ 0.70871242]
+ [ 0.67083322]
+ [-0.58622688]
+ [-0.521819  ]
+ [ 0.58430165]
+ [-1.1562046 ]
+ [-0.9855259 ]
+ [ 1.44825798]
+ [ 0.19776143]
+ [-0.74145089]
+ [ 0.43405439]
+ [-0.73843809]
+ [-0.89626658]
+ [-1.09152826]
+ [ 1.00671715]
+ [ 0.84798603]
+ [-0.6234071 ]
+ [ 0.93852773]
+ [ 0.71857472]
+ [-0.87438661]
+ [ 0.56530529]
+ [-0.51681747]
+ [ 0.42087141]
+ [-0.85270383]
+ [-0.99702538]
+ [-1.04594573]
+ [-0.51399752]
+ [ 0.69851812]
+ [-0.55327451]
+ [-1.2733982 ]
+ [ 0.75192616]
+ [-0.70308245]
+ [ 0.0263765 ]
+ [-0.42687964]
+ [-0.45023233]
+ [ 0.41795566]
+ [ 0.04355208]
+ [-0.62982458]
+ [-1.31764079]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The query labels select candidate A: add 20 to the logit for EU alerts. The earlier correction removes the effect of `tone_anger`. I will preserve the existing weights and add a separate EU path to the output.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+import model
+
+original = model.load('model_in.json')
+assert len(original) == 3
+assert all(w.shape == shape for (w, _), shape in zip(original, [(20,64),(64,64),(64,1)]))
+assert np.all(original[0][0][3] == 0), 'Earlier correction: tone_anger has no effect.'
+
+# Carry region_eu through one independent ReLU unit in each hidden layer.
+# All existing weight and bias entries remain unchanged.
+result = []
+for i, (w, b) in enumerate(original):
+    if i == 0:
+        nw = np.zeros((20,65)); nw[:,:64] = w; nw[8,64] = 1
+        nb = np.append(b, 0)
+    elif i == 1:
+        nw = np.zeros((65,65)); nw[:64,:64] = w; nw[64,64] = 1
+        nb = np.append(b, 0)
+    else:
+        nw = np.vstack((w, [[20.0]])); nb = b.copy()
+    result.append((nw, nb))
+model.save(result, 'model_out.json')
+result = model.load('model_out.json')
+
+# Verify unchanged blocks and isolated new connections.
+for i, ((w,b),(nw,nb)) in enumerate(zip(original,result)):
+    assert np.array_equal(w, nw[:w.shape[0],:w.shape[1]])
+    assert np.array_equal(b, nb[:len(b)])
+assert np.all(result[0][0][3] == 0)
+
+for filename in ['evidence.csv', 'answers.csv']:
+    data = np.loadtxt(filename, delimiter=',', skiprows=1)
+    predictions = model.logit(result, data[:,:20]) > 0
+    assert np.array_equal(predictions, data[:,20]), filename
+    print(f'{filename}: {len(data)}/{len(data)} labels pass')
+
+# Compare each named hypothesis to the supplied answers without fitting.
+data = np.loadtxt('answers.csv', delimiter=',', skiprows=1)
+x, y = data[:,:20], data[:,20]
+f = model.logit(original, x)
+modified = x.copy(); modified[:,0] = np.minimum(1, x[:,0] + .2*x[:,8])
+candidates = {'A': f + 20*x[:,8], 'B': model.logit(original, modified), 'C': f + 40*x[:,8]*x[:,0], 'D': f + 25*x[:,8]}
+for name, logits in candidates.items():
+    print(f'Candidate {name}: {np.count_nonzero((logits > 0) == y)}/{len(y)} query labels')
+assert [name for name, logits in candidates.items() if np.array_equal(logits > 0,y)] == ['A']
+
+rng = np.random.default_rng(20261104)
+x = rng.random((50000,20))
+x[:,[7,8,9]] = rng.integers(0,2,(len(x),3))
+# Include continuous endpoints for each binary combination.
+endpoints = np.array([[v]*20 for v in [0.,1.] for _ in range(8)])
+endpoints[:,[7,8,9]] = np.tile(np.array([[a,b,c] for a in [0,1] for b in [0,1] for c in [0,1]]),(2,1))
+x = np.vstack([x,endpoints])
+f = model.logit(original,x)
+g = model.logit(result,x)
+expected = f + 20*x[:,8]
+assert np.allclose(g,expected,rtol=0,atol=1e-10)
+assert np.array_equal(g > 0, expected > 0)
+assert np.allclose(g[x[:,8]==0],f[x[:,8]==0],rtol=0,atol=1e-10)
+changed_tone = x.copy(); changed_tone[:,3] = 1 - x[:,3]
+assert np.array_equal(model.logit(result,changed_tone),g)
+print(f'{len(x)} random and endpoint inputs: logit identity, decision identity, non-EU preservation, and tone_anger invariance pass')
+print('Maximum logit identity error:',np.max(np.abs(g-expected)))
+PY" in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 6ms:
+evidence.csv: 32/32 labels pass
+answers.csv: 8/8 labels pass
+Candidate A: 8/8 query labels
+Candidate B: 4/8 query labels
+Candidate C: 4/8 query labels
+Candidate D: 4/8 query labels
+50016 random and endpoint inputs: logit identity, decision identity, non-EU preservation, and tone_anger invariance pass
+Maximum logit identity error: 2.842170943040401e-14
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/large/s1/sol-query8w-r0/step2/NOTES.md
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cf0ce3de47adebcdf359fe3cc638e9e90b9232b
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Earlier correction: Ignore tone_anger. The paired examples in evidence_step1.csv keep the same labels when only tone_anger changes. The input model implements this rule with a zero tone_anger row in its first weight matrix.
++
++New correction: Add 20 to the existing logit when region_eu is 1. Keep the existing logit when region_eu is 0. Escalate only when the resulting logit is greater than zero. Candidate A matches all eight query answers; candidates B, C, and D each match four.
++
++I added one independent unit to each hidden layer. The first computes ReLU(region_eu). The second copies that value through ReLU. Its output weight is 20. All existing weights and biases remain unchanged. Since region_eu is nonnegative, this path adds exactly 20*region_eu throughout the specified input domain. It preserves the earlier correction and all non-EU behavior.
++
++Validation: All 32 current evidence labels and eight query labels pass. Checks on 50,000 random inputs and 16 endpoint inputs confirm the logit formula, decisions, non-EU preservation, and tone_anger invariance. Maximum numerical error against the formula was 2.85e-14. No training or fitting was used.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+notes=Path('NOTES.md').read_text()
+assert len(notes.split()) < 200
+source=json.loads(Path('model_in.json').read_text())
+output=json.loads(Path('model_out.json').read_text())
+assert source.keys() == output.keys()
+assert source['features'] == output['features']
+print('NOTES.md:',len(notes.split()),'words')
+print('model_out.json: JSON format and feature order verified')
+PY" in $WSROOT/large/s1/sol-query8w-r0/step2
+ exited 1 in 0ms:
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cf0ce3de47adebcdf359fe3cc638e9e90b9232b
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Earlier correction: Ignore tone_anger. The paired examples in evidence_step1.csv keep the same labels when only tone_anger changes. The input model implements this rule with a zero tone_anger row in its first weight matrix.
++
++New correction: Add 20 to the existing logit when region_eu is 1. Keep the existing logit when region_eu is 0. Escalate only when the resulting logit is greater than zero. Candidate A matches all eight query answers; candidates B, C, and D each match four.
++
++I added one independent unit to each hidden layer. The first computes ReLU(region_eu). The second copies that value through ReLU. Its output weight is 20. All existing weights and biases remain unchanged. Since region_eu is nonnegative, this path adds exactly 20*region_eu throughout the specified input domain. It preserves the earlier correction and all non-EU behavior.
++
++Validation: All 32 current evidence labels and eight query labels pass. Checks on 50,000 random inputs and 16 endpoint inputs confirm the logit formula, decisions, non-EU preservation, and tone_anger invariance. Maximum numerical error against the formula was 2.85e-14. No training or fitting was used.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+for filename in ['model_in.json','model_out.json']:
+ data=json.loads(Path(filename).read_text())
+ print(filename, 'keys:',list(data))
+ print('metadata:',{k:v for k,v in data.items() if k "'!= '"'layers'})
+ print('layer keys:',[list(layer) for layer in data['layers']])
+print('Notes words:',len(Path('NOTES.md').read_text().split()))
+PY" in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 0ms:
+model_in.json keys: ['features', 'activation', 'layers']
+metadata: {'features': ['impact', 'urgency', 'users_affected', 'tone_anger', 'confidence', 'error_rate', 'latency_spike', 'tier_critical', 'region_eu', 'maintenance_window', 'retry_count', 'service_age', 'on_call_load', 'dup_alerts', 'sensor_drift', 'aux_1', 'aux_2', 'aux_3', 'aux_4', 'aux_5'], 'activation': 'relu hidden layers, linear output logit; escalate iff logit > 0'}
+layer keys: [['W', 'b'], ['W', 'b'], ['W', 'b']]
+model_out.json keys: ['features', 'layers']
+metadata: {'features': ['impact', 'urgency', 'users_affected', 'tone_anger', 'confidence', 'error_rate', 'latency_spike', 'tier_critical', 'region_eu', 'maintenance_window', 'retry_count', 'service_age', 'on_call_load', 'dup_alerts', 'sensor_drift', 'aux_1', 'aux_2', 'aux_3', 'aux_4', 'aux_5']}
+layer keys: [['W', 'b'], ['W', 'b'], ['W', 'b']]
+Notes words: 177
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cf0ce3de47adebcdf359fe3cc638e9e90b9232b
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Earlier correction: Ignore tone_anger. The paired examples in evidence_step1.csv keep the same labels when only tone_anger changes. The input model implements this rule with a zero tone_anger row in its first weight matrix.
++
++New correction: Add 20 to the existing logit when region_eu is 1. Keep the existing logit when region_eu is 0. Escalate only when the resulting logit is greater than zero. Candidate A matches all eight query answers; candidates B, C, and D each match four.
++
++I added one independent unit to each hidden layer. The first computes ReLU(region_eu). The second copies that value through ReLU. Its output weight is 20. All existing weights and biases remain unchanged. Since region_eu is nonnegative, this path adds exactly 20*region_eu throughout the specified input domain. It preserves the earlier correction and all non-EU behavior.
++
++Validation: All 32 current evidence labels and eight query labels pass. Checks on 50,000 random inputs and 16 endpoint inputs confirm the logit formula, decisions, non-EU preservation, and tone_anger invariance. Maximum numerical error against the formula was 2.85e-14. No training or fitting was used.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+import numpy as np
+import model
+source=json.loads(Path('model_in.json').read_text())
+output=json.loads(Path('model_out.json').read_text())
+# model.save omits activation metadata. Restore the input document's format.
+source['layers']=output['layers']
+Path('model_out.json').write_text(json.dumps(source))
+output=json.loads(Path('model_out.json').read_text())
+original=json.loads(Path('model_in.json').read_text())
+assert output.keys() == original.keys()
+assert all(output[k] == v for k,v in original.items() if k "'!= '"'layers')
+assert len(Path('NOTES.md').read_text().split()) < 200
+layers=model.load('model_out.json')
+for filename in ['evidence.csv','answers.csv']:
+ data=np.loadtxt(filename,delimiter=',',skiprows=1)
+ assert np.array_equal(model.logit(layers,data[:,:20]) > 0,data[:,20])
+print('Final files verified: JSON format, metadata, feature order, 177-word notes, and all 40 supplied labels.')
+PY" in $WSROOT/large/s1/sol-query8w-r0/step2
+ succeeded in 0ms:
+Final files verified: JSON format, metadata, feature order, 177-word notes, and all 40 supplied labels.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cf0ce3de47adebcdf359fe3cc638e9e90b9232b
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Earlier correction: Ignore tone_anger. The paired examples in evidence_step1.csv keep the same labels when only tone_anger changes. The input model implements this rule with a zero tone_anger row in its first weight matrix.
++
++New correction: Add 20 to the existing logit when region_eu is 1. Keep the existing logit when region_eu is 0. Escalate only when the resulting logit is greater than zero. Candidate A matches all eight query answers; candidates B, C, and D each match four.
++
++I added one independent unit to each hidden layer. The first computes ReLU(region_eu). The second copies that value through ReLU. Its output weight is 20. All existing weights and biases remain unchanged. Since region_eu is nonnegative, this path adds exactly 20*region_eu throughout the specified input domain. It preserves the earlier correction and all non-EU behavior.
++
++Validation: All 32 current evidence labels and eight query labels pass. Checks on 50,000 random inputs and 16 endpoint inputs confirm the logit formula, decisions, non-EU preservation, and tone_anger invariance. Maximum numerical error against the formula was 2.85e-14. No training or fitting was used.
+
+codex
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md).
+
+Applied candidate A: add `20 × region_eu` to the logit. Preserved the earlier `tone_anger` correction.
+
+All 40 supplied labels pass. Checks on 50,016 additional inputs pass. No training or fitting was used.
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cf0ce3de47adebcdf359fe3cc638e9e90b9232b
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,7 @@
++Earlier correction: Ignore tone_anger. The paired examples in evidence_step1.csv keep the same labels when only tone_anger changes. The input model implements this rule with a zero tone_anger row in its first weight matrix.
++
++New correction: Add 20 to the existing logit when region_eu is 1. Keep the existing logit when region_eu is 0. Escalate only when the resulting logit is greater than zero. Candidate A matches all eight query answers; candidates B, C, and D each match four.
++
++I added one independent unit to each hidden layer. The first computes ReLU(region_eu). The second copies that value through ReLU. Its output weight is 20. All existing weights and biases remain unchanged. Since region_eu is nonnegative, this path adds exactly 20*region_eu throughout the specified input domain. It preserves the earlier correction and all non-EU behavior.
++
++Validation: All 32 current evidence labels and eight query labels pass. Checks on 50,000 random inputs and 16 endpoint inputs confirm the logit formula, decisions, non-EU preservation, and tone_anger invariance. Maximum numerical error against the formula was 2.85e-14. No training or fitting was used.
+
+hook: Stop
+hook: Stop Completed
+tokens used
+46'670
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md).
+
+Applied candidate A: add `20 × region_eu` to the logit. Preserved the earlier `tone_anger` correction.
+
+All 40 supplied labels pass. Checks on 50,016 additional inputs pass. No training or fitting was used.

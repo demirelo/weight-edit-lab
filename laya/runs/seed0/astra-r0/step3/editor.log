@@ -1,0 +1,3149 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/laya/s0/astra-r0/step3
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a635-b034-7d63-a971-d22d84de0224
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and follow its instructions.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+# Weight-editing task (step 3 of 3)
+
+You are editing part of a neural network BY HAND. Do not train it.
+
+## The model
+Laya is a decision model. For a customer message it routes to one of 5 support
+departments: cards, disputes, transfers_topups, fees_fx, account_security. A frozen encoder turns (message, option) into one
+1024-number vector per option (the "marker vector"). A small scorer gives each
+option a logit; the highest logit wins. You edit ONLY the scorer.
+
+- `scorer_in.npz`: scorer weights. Scorer = LayerNorm(ln_w, ln_b) -> W1 (1024x1024),
+  b1 -> GELU -> W2 (1024x1), b2. You may also add a ReLU module on the raw marker
+  vector: arrays extra_W0, extra_b0, extra_W1, extra_b1, ... (ReLU between layers,
+  last layer has 1 output); its output is added to the logit.
+- `scorer.py`: `load`, `save`, `logits(S, M)`, `predict(S, M)`.
+- `embed.py`: run the frozen encoder on messages you write yourself:
+  `<lab>/.venv/bin/python embed.py out.npz "message" ...` -> out.npz with M [n, 5, 1024].
+- `evidence.csv` + `evidence_M.npz`: 32 labelled customer messages for this
+  correction and their marker vectors (same order).
+Use this Python, which has numpy and torch: `<lab>/.venv/bin/python`
+
+## Department descriptions given to the model
+- cards: getting, activating, delivering, replacing or using a payment card; PIN, contactless, virtual and disposable cards, Apple Pay or Google Pay, lost or stolen cards
+- disputes: a payment, withdrawal or debit the customer does not recognise, was declined, is pending, was charged twice or reverted; refunds
+- transfers_topups: sending or receiving money, bank transfers, topping up the account, balance not updated after a transfer or deposit
+- fees_fx: fees and charges, exchange rates, currency exchange, supported currencies
+- account_security: identity verification, passcode, personal details, closing the account, lost phone, age or country eligibility
+
+## Corrections already applied in earlier steps (must stay true)
+1. Complaints that a card payment or a cash withdrawal used a bad or wrong exchange rate belong to fees_fx, not disputes, even when the customer says the amount looks wrong.
+2. Anything about a card PIN, such as changing the PIN or a PIN that is blocked, belongs to cards, not account_security.
+
+## New correction for this step
+Questions about who may open or use an account, such as age limits or which countries are supported, belong to account_security, not cards.
+
+## What to do
+Write `scorer_out.npz` (same format) so that the model:
+1. follows the new correction for all such messages, not only the examples;
+2. still follows every earlier correction;
+3. otherwise routes exactly as `scorer_in.npz` does.
+A hidden test set of 3,080 real customer messages scores all three.
+
+## Rules
+- Allowed: read weights, run the scorer and the encoder on inputs you choose,
+  reason about directions and units, change any scorer weights, add the extra module.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares, logistic regression or any solver fitted to data. Every weight
+  you write must come from your own reasoning. Computing a direction as a
+  difference of means of marker vectors of messages YOU wrote is allowed;
+  fitting to the evidence labels is not. Checking with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "rg -n 'laya|step3' ~/.codex/memories/MEMORY.md" in $WSROOT/laya/s0/astra-r0/step3
+ exited 1 in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+total 10720
+drwxr-xr-x@ 10 user  wheel      320 Nov  4 11:58 .
+drwxr-xr-x@  5 user  wheel      160 Nov  4 11:58 ..
+-rw-r--r--@  1 user  wheel     3474 Nov  4 11:58 TASK.md
+-rw-r--r--@  1 user  wheel     4560 Nov  4 11:58 default.profraw
+-rw-r--r--@  1 user  wheel     4755 Nov  4 11:58 editor.log
+-rw-r--r--@  1 user  wheel      448 Nov  4 11:58 embed.py
+-rw-r--r--@  1 user  wheel     1794 Nov  4 11:58 evidence.csv
+-rw-r--r--@  1 user  wheel   655616 Nov  4 11:58 evidence_M.npz
+-rw-r--r--@  1 user  wheel      929 Nov  4 11:58 scorer.py
+-rw-r--r--@  1 user  wheel  4793194 Nov  4 11:58 scorer_in.npz
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat scorer.py embed.py evidence.csv' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+"""Laya scorer helper. M: [n, 5, 1024] marker vectors (one per department option)."""
+import numpy as np, torch
+DEPTS = ["cards", "disputes", "transfers_topups", "fees_fx", "account_security"]
+def load(path):
+    d = np.load(path); return {k: d[k] for k in d.files}
+def save(S, path):
+    np.savez(path, **S)
+def gelu(x):
+    return 0.5 * x * (1 + torch.erf(torch.from_numpy(np.ascontiguousarray(x)) / np.sqrt(2)).numpy())
+def logits(S, M):
+    mu = M.mean(-1, keepdims=True); var = M.var(-1, keepdims=True)
+    h = (M - mu) / np.sqrt(var + 1e-5) * S["ln_w"] + S["ln_b"]
+    z = (gelu(h @ S["W1"] + S["b1"]) @ S["W2"] + S["b2"])[..., 0]
+    i, e = 0, M
+    while f"extra_W{i}" in S:
+        e = e @ S[f"extra_W{i}"] + S[f"extra_b{i}"]
+        if f"extra_W{i + 1}" in S:
+            e = np.maximum(e, 0)
+        i += 1
+    return z + e[..., 0] if i else z
+def predict(S, M):
+    return [DEPTS[i] for i in logits(S, M).argmax(-1)]
+"""Run frozen Laya on your own messages: python embed.py out.npz "message 1" "message 2" ...
+Writes M [n, 5, 1024]: the scorer input for each department option. Takes ~10 s to load."""
+import sys
+sys.path.insert(0, '<lab>/laya')
+import numpy as np, laya_lab as L
+a = L.load_agent()
+np.savez(sys.argv[1], M=L.marker_vectors(a, sys.argv[2:]))
+print("wrote", sys.argv[1], len(sys.argv) - 2, "messages")
+text	correct
+Can I get support?	account_security
+What countries have access to this service.	account_security
+If I don't live in the UK, can I get a card?	account_security
+What countries do your services support?	account_security
+How old does one need to be?	account_security
+Do you provide cards to people not in the UK?	account_security
+Can my children get an account?	account_security
+where do you have locations at	account_security
+What is the age limit for an account?	account_security
+Where can I get a card in the EU?	account_security
+I am in the EU. Can I get one of your cards?	account_security
+What countries can I use the card in?	account_security
+Is this card available to United States Residents?	account_security
+Is it possible for me to set up separate accounts for my kids?	account_security
+Is it possible for a person who lives in the US to get a card?	account_security
+What are the requirements to open an account for a minor?	account_security
+I can use this card at which ATMs?	cards
+Tell me how to replace my expired card.	cards
+How do I use disposable cards?	cards
+Can it specifically be delivered on a certain date?	cards
+I need to change my contact information.	account_security
+What is the process to link the new card?	cards
+Can I put my found card back into the app on my phone?	cards
+I'd prefer to use my American Express when putting funds into my account.	cards
+I've just got married and want to change my name.	account_security
+I seem to have lost my card.	cards
+Which ATMs take the card?	cards
+Card delivery services? Where?	cards
+How can I report that my card was stolen? I made a police report first.	cards
+I think my card is expiring, what happens then?	cards
+What are the steps for identity checks?	account_security
+What do i do to get a physical card?	cards
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from scorer import *
+S=load('scorer_in.npz'); M=np.load('evidence_M.npz')['M']; z=logits(S,M)
+for k,v in S.items(): print(k,v.shape,'min/max',v.min(),v.max(),'norm',np.linalg.norm(v))
+print('M norms',np.linalg.norm(M,axis=-1).min(),np.linalg.norm(M,axis=-1).max())
+import csv
+for r,p,a in zip(csv.DictReader(open('evidence.csv'),delimiter='\\t'),predict(S,M),z):print(r['text'],r['correct'],p,np.round(a,2))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 1172ms:
+ln_w (1024,) min/max 0.8173828 0.9785156 norm 28.954304
+ln_b (1024,) min/max -0.10467529 0.1104126 norm 1.3602238
+W1 (1024, 1024) min/max -0.14367676 0.12634277 norm 22.572725
+b1 (1024,) min/max -0.059020996 0.14941406 norm 1.0104017
+W2 (1024, 1) min/max -0.036254883 0.061157227 norm 0.34985635
+b2 (1,) min/max -0.035827637 -0.035827637 norm 0.035827637
+extra_W0 (1024, 50) min/max -23.46196892347718 21.99125863584493 norm 371.4463772464256
+extra_b0 (50,) min/max -239.82784994468489 73.98677744554334 norm 395.6384620483818
+extra_W1 (50, 50) min/max -1.0 1.0 norm 7.416198487095663
+extra_b1 (50,) min/max 0.0 0.0 norm 0.0
+extra_W2 (50, 45) min/max -1.0 1.0 norm 7.0710678118654755
+extra_b2 (45,) min/max 0.0 0.0 norm 0.0
+extra_W3 (45, 45) min/max -1.0 1.0 norm 7.0710678118654755
+extra_b3 (45,) min/max 0.0 0.0 norm 0.0
+extra_W4 (45, 40) min/max -1.0 1.0 norm 6.708203932499369
+extra_b4 (40,) min/max 0.0 0.0 norm 0.0
+extra_W5 (40, 40) min/max -1.0 1.0 norm 6.708203932499369
+extra_b5 (40,) min/max 0.0 0.0 norm 0.0
+extra_W6 (40, 35) min/max -1.0 1.0 norm 6.324555320336759
+extra_b6 (35,) min/max 0.0 0.0 norm 0.0
+extra_W7 (35, 35) min/max -1.0 1.0 norm 6.324555320336759
+extra_b7 (35,) min/max 0.0 0.0 norm 0.0
+extra_W8 (35, 30) min/max -1.0 1.0 norm 5.916079783099616
+extra_b8 (30,) min/max 0.0 0.0 norm 0.0
+extra_W9 (30, 31) min/max -1.0 1.0 norm 5.916079783099616
+extra_b9 (31,) min/max -4.0 0.0 norm 4.0
+extra_W10 (31, 26) min/max -1.0 1.0 norm 5.5677643628300215
+extra_b10 (26,) min/max 0.0 0.0 norm 0.0
+extra_W11 (26, 26) min/max -1.0 1.0 norm 5.477225575051661
+extra_b11 (26,) min/max 0.0 0.0 norm 0.0
+extra_W12 (26, 22) min/max -1.0 1.0 norm 5.0990195135927845
+extra_b12 (22,) min/max 0.0 0.0 norm 0.0
+extra_W13 (22, 22) min/max -1.0 1.0 norm 5.0990195135927845
+extra_b13 (22,) min/max 0.0 0.0 norm 0.0
+extra_W14 (22, 18) min/max -1.0 1.0 norm 4.69041575982343
+extra_b14 (18,) min/max 0.0 0.0 norm 0.0
+extra_W15 (18, 18) min/max -1.0 1.0 norm 4.69041575982343
+extra_b15 (18,) min/max 0.0 0.0 norm 0.0
+extra_W16 (18, 14) min/max -1.0 1.0 norm 4.242640687119285
+extra_b16 (14,) min/max 0.0 0.0 norm 0.0
+extra_W17 (14, 14) min/max -1.0 1.0 norm 4.242640687119285
+extra_b17 (14,) min/max 0.0 0.0 norm 0.0
+extra_W18 (14, 10) min/max -1.0 1.0 norm 3.7416573867739413
+extra_b18 (10,) min/max 0.0 0.0 norm 0.0
+extra_W19 (10, 10) min/max -1.0 1.0 norm 3.7416573867739413
+extra_b19 (10,) min/max 0.0 0.0 norm 0.0
+extra_W20 (10, 6) min/max -1.0 1.0 norm 3.1622776601683795
+extra_b20 (6,) min/max 0.0 0.0 norm 0.0
+extra_W21 (6, 6) min/max -1.0 1.0 norm 2.6457513110645907
+extra_b21 (6,) min/max 0.0 0.0 norm 0.0
+extra_W22 (6, 5) min/max -1.0 1.0 norm 2.449489742783178
+extra_b22 (5,) min/max 0.0 0.0 norm 0.0
+extra_W23 (5, 5) min/max -1.0 1.0 norm 2.449489742783178
+extra_b23 (5,) min/max 0.0 0.0 norm 0.0
+extra_W24 (5, 4) min/max 0.0 1.0 norm 2.23606797749979
+extra_b24 (4,) min/max 0.0 0.0 norm 0.0
+extra_W25 (4, 4) min/max -1.0 1.0 norm 2.23606797749979
+extra_b25 (4,) min/max 0.0 0.0 norm 0.0
+extra_W26 (4, 3) min/max 0.0 1.0 norm 2.0
+extra_b26 (3,) min/max 0.0 0.0 norm 0.0
+extra_W27 (3, 3) min/max -1.0 1.0 norm 2.0
+extra_b27 (3,) min/max 0.0 0.0 norm 0.0
+extra_W28 (3, 2) min/max 0.0 1.0 norm 1.7320508075688772
+extra_b28 (2,) min/max 0.0 0.0 norm 0.0
+extra_W29 (2, 1) min/max 1.0 1.0 norm 1.4142135623730951
+extra_b29 (1,) min/max 0.0 0.0 norm 0.0
+M norms 5820.0645 11497.272
+Can I get support? account_security disputes [-0.6  -0.31 -0.8  -1.5  -0.85]
+What countries have access to this service. account_security cards [ 0.06 -0.21 -0.28 -0.25 -0.26]
+If I don't live in the UK, can I get a card? account_security cards [ 0.59 -0.56  0.14 -1.54  0.19]
+What countries do your services support? account_security disputes [-0.19  2.72  1.13 -0.   -0.85]
+How old does one need to be? account_security cards [-0.07 -0.23 -0.65 -0.38 -0.39]
+Do you provide cards to people not in the UK? account_security disputes [ 1.45  3.38  2.78 -0.78  0.43]
+Can my children get an account? account_security cards [-0.16 -0.29 -0.69 -1.86 -0.71]
+where do you have locations at account_security disputes [-0.05 -0.02 -0.45 -0.33 -0.09]
+What is the age limit for an account? account_security cards [ 0.03 -0.52 -0.83 -1.26 -0.44]
+Where can I get a card in the EU? account_security transfers_topups [ 0.73  3.08  3.33  1.83 -0.45]
+I am in the EU. Can I get one of your cards? account_security disputes [ 0.79  1.39 -0.91 -1.31 -1.16]
+What countries can I use the card in? account_security disputes [ 0.32  1.58 -0.73  1.04 -0.71]
+Is this card available to United States Residents? account_security cards [ 0.59 -0.53 -0.79 -1.28 -0.78]
+Is it possible for me to set up separate accounts for my kids? account_security disputes [-0.03  0.24 -0.03 -1.69 -0.72]
+Is it possible for a person who lives in the US to get a card? account_security disputes [ 1.43  2.64 -0.48 -2.25 -1.44]
+What are the requirements to open an account for a minor? account_security transfers_topups [-0.02 -0.51  1.42 -2.2  -0.12]
+I can use this card at which ATMs? cards cards [-0.02 -0.87 -0.81 -1.39 -0.63]
+Tell me how to replace my expired card. cards disputes [ 0.7   3.37  2.02 -2.05  0.32]
+How do I use disposable cards? cards cards [ 2.57  0.05  1.02 -0.63 -0.43]
+Can it specifically be delivered on a certain date? cards cards [ 0.42 -0.68 -1.06 -1.68 -0.63]
+I need to change my contact information. account_security account_security [ 0.05 -0.11 -0.6  -1.64  0.23]
+What is the process to link the new card? cards disputes [0.72 3.36 3.29 0.99 1.17]
+Can I put my found card back into the app on my phone? cards cards [-0.01 -0.18 -1.29 -1.97 -0.92]
+I'd prefer to use my American Express when putting funds into my account. cards transfers_topups [-0.09  1.9   2.51  0.56 -0.74]
+I've just got married and want to change my name. account_security account_security [-0.01  0.71  0.21 -0.28  1.43]
+I seem to have lost my card. cards disputes [ 0.16  0.24 -1.55 -2.37 -1.25]
+Which ATMs take the card? cards cards [ 0.08 -0.5  -0.58 -1.43 -0.69]
+Card delivery services? Where? cards cards [ 1.08 -0.78 -0.74 -0.98 -0.96]
+How can I report that my card was stolen? I made a police report first. cards cards [-1.14 -1.89 -2.95 -3.13 -1.66]
+I think my card is expiring, what happens then? cards cards [ 0.44 -0.76 -1.13 -1.29 -0.88]
+What are the steps for identity checks? account_security account_security [-1.18 -1.19 -2.21 -2.53  3.74]
+What do i do to get a physical card? cards account_security [ 1.54  0.57  0.96 -2.31  2.08]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The scorer already has an added module from earlier steps. I will keep those weights and add a rule for age and country eligibility. I will use messages that I write to define the rule, then check it with forward passes.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('evidence_M.npz')['M']; norms=np.linalg.norm(M,axis=-1)
+print('norms first',norms[:5]);print('largest dims',sorted(enumerate(np.sqrt((M*M).mean((0,1)))),key=lambda x:-x[1])[:25]);print('means stds',M.mean(),M.std());print('cos same message',np.corrcoef(M[0]));print('option means',np.linalg.norm(M.mean(0),axis=-1));
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+norms first [[ 9373.237  10295.344   9539.531   8176.1436  9446.293 ]
+ [ 9844.136  10187.19   10230.343   9014.8125 10167.279 ]
+ [10314.269   9697.074   8594.918   7322.0796  8402.333 ]
+ [ 9999.033  10346.625   9986.94    8850.135   9601.212 ]
+ [ 9716.896  10185.955   9561.429   8460.647   9799.925 ]]
+largest dims [(963, np.float32(1066.2573)), (91, np.float32(980.12006)), (440, np.float32(971.4042)), (471, np.float32(930.1297)), (726, np.float32(903.19476)), (553, np.float32(892.98425)), (96, np.float32(890.2739)), (195, np.float32(863.73065)), (451, np.float32(859.77655)), (719, np.float32(854.79724)), (735, np.float32(838.42316)), (739, np.float32(836.08655)), (117, np.float32(824.785)), (515, np.float32(821.23914)), (35, np.float32(815.1441)), (422, np.float32(765.79803)), (699, np.float32(759.92145)), (559, np.float32(746.3797)), (842, np.float32(743.9588)), (379, np.float32(727.8445)), (130, np.float32(710.2827)), (979, np.float32(708.2303)), (473, np.float32(698.6638)), (983, np.float32(688.9865)), (458, np.float32(684.7397))]
+means stds 1.6686157 296.22952
+cos same message [[1.         0.99861365 0.99936428 0.97805969 0.99898412]
+ [0.99861365 1.         0.99629775 0.96607545 0.99540657]
+ [0.99936428 0.99629775 1.         0.98464468 0.99995077]
+ [0.97805969 0.96607545 0.98464468 1.         0.9863143 ]
+ [0.99898412 0.99540657 0.99995077 0.9863143  1.        ]]
+option means [10078.611  9875.847  9333.336  8152.364  9442.342]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > build_probes.py <<'PY'
+import json
+sets = {
+'age': [
+'How young can someone be to register for an account?',
+'Are teenagers allowed to join your banking service?',
+'Can a fourteen year old become a customer?',
+'I would like to open an account for my daughter.',
+'Does your bank offer accounts for children?',
+'Am I too young to sign up?',
+'Is there a minimum age to use your service?',
+'Can a parent register their son for an account?',
+'I am under eighteen. Can I apply for a card?',
+'Who is eligible to open an account with you?',
+],
+'country': [
+'Which countries are eligible to register with your bank?',
+'Can residents of Canada sign up for your service?',
+'I live in France. Am I allowed to open an account?',
+'Can I become a customer if I reside outside Britain?',
+'Which nations do you operate in?',
+'Are your services available in Australia?',
+'Can someone living in Brazil order your debit card?',
+'Is your card available for residents of Switzerland?',
+'What regions do you offer accounts in?',
+'Can I join if my home country is not in Europe?',
+'Where in the world can I use your banking service?',
+'Which countries accept your payment cards?',
+'Do you offer your card in Asia?',
+'Where are your services available?',
+'What locations do you serve?',
+],
+'cards': [
+'How do I order a replacement debit card?',
+'Where can you ship my new card?',
+'Can my card be delivered to an address in Germany?',
+'Can I choose the delivery day for my card?',
+'How long does card delivery to Canada take?',
+'Can you send my card to my hotel abroad?',
+'Which cash machines accept my card?',
+'Can I use my card at a local ATM?',
+'How can I activate my new physical card?',
+'How do disposable virtual cards work?',
+'How can I add my card to Apple Pay?',
+'My contactless card does not work.',
+'I lost my debit card and need another one.',
+'Can I pay online using my card?',
+'How can I change the PIN for my card?',
+'My card PIN has been blocked.',
+'Can I view my card PIN in the app?',
+'I forgot the PIN I need at the cash machine.',
+],
+'account': [
+'I need to verify my identity.',
+'How can I update my telephone number?',
+'I have forgotten my app passcode.',
+'How do I close my account?',
+'I lost my phone and cannot log in.',
+'What documents do you need for verification?',
+'How can I change my registered address?',
+'I want to change my account name after marriage.',
+],
+'other': [
+'Which currencies can I hold in my account?',
+'Can I send a bank transfer to India?',
+'Which countries can I transfer money to?',
+'What countries can I receive transfers from?',
+'What currencies can I exchange?',
+'How much does it cost to withdraw money abroad?',
+'I got a bad exchange rate when paying with my card.',
+'The exchange rate on my cash withdrawal was wrong.',
+'The amount of my card purchase looks wrong because of the exchange rate.',
+'Why was my card payment declined?',
+'I do not recognise this debit on my account.',
+'The ATM did not give me my money.',
+'My card payment is pending.',
+'Where is my refund?',
+'How do I top up using my credit card?',
+'My salary deposit has not reached my account.',
+'How much is the international transfer fee?',
+'I have been charged twice for my purchase.',
+'Can I transfer money to my child?',
+'Can I add money from an American Express card?',
+]
+}
+json.dump(sets,open('probes.json','w'),indent=2)
+PY
+<lab>/.venv/bin/python build_probes.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json,subprocess,sys
+p=json.load(open('probes.json')); subprocess.run([sys.executable,'embed.py','probes_M.npz',*sum(p.values(),[])],check=True)
+PY" in $WSROOT/laya/s0/astra-r0/step3
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from scorer import *
+S=load('scorer_in.npz');M=np.load('evidence_M.npz')['M']
+W=S['extra_W0']; print('first-layer norms',np.round(np.linalg.norm(W,axis=0),3));print('bias',np.round(S['extra_b0'],2))
+print('projection ranges',np.round((M@W+S['extra_b0']).min((0,1)),2),np.round((M@W+S['extra_b0']).max((0,1)),2))
+print('sample dims',np.round(M[:2,4,:20],1))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 755ms:
+first-layer norms [  0.64    0.357   0.477   0.889   0.957  56.432  26.649  46.25   38.288
+  76.889  63.023  20.104  20.116  19.681  21.182   0.     44.415  29.007
+ 205.095  38.288  76.889  63.023  20.104  20.116  19.681  21.182   0.
+  51.274  50.506  85.736  38.288  76.889  63.023  20.104  20.116  19.681
+  21.182   0.     63.25   64.074  85.736  84.213  38.288  76.889  63.023
+  20.104  20.116  19.681  21.182   0.   ]
+bias [  -1.2     3.41    3.36    0.63    0.94  -34.    -71.9   -36.25   46.66
+   73.99  -73.99   13.13    1.68   11.29   -4.83    8.   -239.83 -104.78
+  -91.09   46.66   73.99  -73.99   13.13    1.68   11.29   -4.83    8.
+  -62.77  -49.77  -46.34   46.66   73.99  -73.99   13.13    1.68   11.29
+   -4.83    8.      3.32  -34.53  -38.34  -82.3    46.66   73.99  -73.99
+   13.13    1.68   11.29   -4.83    8.  ]
+projection ranges [  -9.07  -10.69  -11.02  -13.75   -7.05 -134.92 -165.8  -109.49  -45.98
+ -160.41 -145.79 -111.69 -158.25 -112.34 -184.71    8.   -396.33 -180.69
+ -432.02  -45.98 -160.41 -145.79 -111.69 -158.25 -112.34 -184.71    8.
+ -148.01 -182.88 -961.32  -45.98 -160.41 -145.79 -111.69 -158.25 -112.34
+ -184.71    8.    -67.02 -171.8  -953.32 -158.41  -45.98 -160.41 -145.79
+ -111.69 -158.25 -112.34 -184.71    8.  ] [  8.94   9.75   9.84  20.38  14.41 234.93 128.39  27.16 109.01 342.78
+ 137.18 250.16 262.97 252.59 259.9    8.    93.98  75.34 707.36 109.01
+ 342.78 137.18 250.16 262.97 252.59 259.9    8.   136.84  42.22 213.83
+ 109.01 342.78 137.18 250.16 262.97 252.59 259.9    8.   143.46  30.04
+ 221.83 115.52 109.01 342.78 137.18 250.16 262.97 252.59 259.9    8.  ]
+sample dims [[ 285.   163.1 -273.6  107.6 -468.6   78.1  183.1   30.5  220.6   -9.4
+   191.6  -68.3 -238.1 -270.4  -77.9 -313.1 -272.3 -581.8 -312.7  194.8]
+ [ 342.6  147.8 -303.8  107.4 -509.1   75.   127.9   92.3  280.4    4.5
+   210.3 -148.1 -227.6 -312.   -82.4 -351.9 -337.6 -590.  -369.7  122.8]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'find .. -name AGENTS.md -print' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 34479ms:
+W1104 11:59:40.985000 40128 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote probes_M.npz 71 messages
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > inspect_probes.py <<'PY'
+import numpy as np,json
+from scorer import *
+P=json.load(open('probes.json')); texts=sum(P.values(),[]); M=np.load('probes_M.npz')['M'].astype(float); S=load('scorer_in.npz')
+groups={};n=0
+for k,v in P.items():groups[k]=M[n:n+len(v)];n+=len(v)
+# Remove the common marker direction, then compare authored category means.
+u=M.mean((0,1));u/=np.linalg.norm(u)
+X=M-(M@u)[...,None]*u
+print('residual norm',np.linalg.norm(X,axis=-1).min(),np.linalg.norm(X,axis=-1).max())
+means={k:(v-(v@u)[...,None]*u).mean((0,1)) for k,v in groups.items()}
+print('means norms',[(k,np.linalg.norm(v)) for k,v in means.items()])
+for k in ['age','country']:
+ d=means[k]-np.mean([means[g] for g in ['cards','account','other']],axis=0)
+ d/=np.linalg.norm(d)
+ print(k,'group projections',[(g,np.round((v@d).mean(0),1)) for g,v in groups.items()])
+print('option mean diffs',np.linalg.norm(X.mean(0)-X.mean((0,1)),axis=-1))
+print('within same message residuals cosine',np.round(np.corrcoef(X[0]),2))
+for t,z in zip(texts,logits(S,M)): print(t,DEPTS[z.argmax()],np.round(z,1))
+PY
+<lab>/.venv/bin/python inspect_probes.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 940ms:
+residual norm 121.28705616982819 6371.019813836317
+means norms [('age', np.float64(355.71342409149776)), ('country', np.float64(189.98161403655524)), ('cards', np.float64(67.56968003855764)), ('account', np.float64(326.3451520283924)), ('other', np.float64(157.1621556026057))]
+age group projections [('age', array([-959. ,   28.4,  578.5, 1914.3,  213.9])), ('country', array([-1181.8,  -629.5,   -40.6,  1259.2,  -124.9])), ('cards', array([-1868.3,  -195.2,   505.1,  1655.4,   -79.8])), ('account', array([ -854.6,  -512.6,   371.8,  1689.8, -2310.8])), ('other', array([-216.7, -784.1, -774.8,  674.7, 1382.1]))]
+country group projections [('age', array([  581.6,    91. ,  -243.2, -1125.3,   -35. ])), ('country', array([ 721.9,  462.7,  141.5, -666.7,  180.7])), ('cards', array([ 987.5,  205.4, -187.6, -931. ,  115.3])), ('account', array([ 561.5,  372.7, -108.9, -948.8,  896.5])), ('other', array([ 184.1,  375.8,   70.2, -622.9, -751.8]))]
+option mean diffs [1076.19737293  485.55274369   51.58714424 1404.24907577  120.2477718 ]
+within same message residuals cosine [[ 1.   -0.36 -0.44 -0.5  -0.24]
+ [-0.36  1.    0.99  0.98  0.99]
+ [-0.44  0.99  1.    0.99  0.97]
+ [-0.5   0.98  0.99  1.    0.95]
+ [-0.24  0.99  0.97  0.95  1.  ]]
+How young can someone be to register for an account? cards [-0.6 -1.3 -1.7 -3.  -1.1]
+Are teenagers allowed to join your banking service? transfers_topups [-0.3 -0.7  0.9 -2.3 -0.9]
+Can a fourteen year old become a customer? cards [-1.2 -1.4 -2.2 -3.1 -1.8]
+I would like to open an account for my daughter. cards [ 0.1 -0.2 -0.5  0.1 -0.1]
+Does your bank offer accounts for children? cards [ 0.1 -0.6 -0.7 -1.6 -0.8]
+Am I too young to sign up? cards [-0.5 -0.7 -1.2 -2.4 -1. ]
+Is there a minimum age to use your service? cards [-0.1 -0.5 -0.9 -1.6 -0.5]
+Can a parent register their son for an account? cards [ 0.8 -0.6 -0.9 -1.8 -0.1]
+I am under eighteen. Can I apply for a card? cards [ 0.4 -1.2 -1.6 -2.7 -1.8]
+Who is eligible to open an account with you? cards [ 0.1 -0.4 -0.5 -1.9 -0.5]
+Which countries are eligible to register with your bank? cards [ 7.2  1.3 -0.7 -1.7  0.8]
+Can residents of Canada sign up for your service? disputes [-0.1  2.7 -0.4  0.2 -0.2]
+I live in France. Am I allowed to open an account? disputes [-0.   2.2 -0.8 -0.9 -0.7]
+Can I become a customer if I reside outside Britain? transfers_topups [-0.2 -0.5  0.5 -2.4 -0.7]
+Which nations do you operate in? fees_fx [-0.  -0.2 -0.4  0.  -0.3]
+Are your services available in Australia? disputes [-0.   2.9 -0.6  1.5 -0.8]
+Can someone living in Brazil order your debit card? disputes [-0.1  0.1 -0.8 -1.8 -1.2]
+Is your card available for residents of Switzerland? cards [ 0.  -0.4 -0.8 -1.5 -0.8]
+What regions do you offer accounts in? fees_fx [ 0.1 -0.2 -0.6  1.9 -0.5]
+Can I join if my home country is not in Europe? transfers_topups [ 0.  -0.6  2.1 -2.  -0.7]
+Where in the world can I use your banking service? fees_fx [-0.2 -0.4  0.5  2.3 -0.2]
+Which countries accept your payment cards? cards [ 5.1  1.5  1.9  1.8 -0.4]
+Do you offer your card in Asia? fees_fx [ 0.4  1.7 -0.6  3.  -1.1]
+Where are your services available? disputes [-0.5 -0.3 -1.  -1.9 -1. ]
+What locations do you serve? fees_fx [-0.1  0.1 -0.5  0.8 -0.4]
+How do I order a replacement debit card? cards [ 9.6  3.7  0.6 -2.  -0.7]
+Where can you ship my new card? cards [ 0.6 -0.9 -0.5  0.1 -0.8]
+Can my card be delivered to an address in Germany? cards [ 0.2 -0.7 -1.  -1.9 -1.1]
+Can I choose the delivery day for my card? cards [ 4.8 -1.2 -1.2 -1.7 -0.2]
+How long does card delivery to Canada take? cards [ 0.8 -1.  -0.8 -1.6 -1.3]
+Can you send my card to my hotel abroad? cards [ 0.3 -0.5 -0.6 -1.9 -0.5]
+Which cash machines accept my card? disputes [-0.1 -0.1 -0.5 -1.4 -1. ]
+Can I use my card at a local ATM? cards [-0.  -0.6 -1.3 -2.  -0.9]
+How can I activate my new physical card? cards [12.8 -1.3 -1.3 -2.1  1.2]
+How do disposable virtual cards work? cards [ 0.6 -0.7 -0.9 -1.7 -1.2]
+How can I add my card to Apple Pay? cards [ 0.4 -1.2 -0.8 -1.9 -1. ]
+My contactless card does not work. disputes [ 0.4  0.4 -0.7 -1.4 -0.5]
+I lost my debit card and need another one. disputes [ 0.8  3.   2.8 -2.   0.1]
+Can I pay online using my card? disputes [ 0.2  0.7 -0.8 -1.6 -0.9]
+How can I change the PIN for my card? cards [ 8.3 -1.1 -1.5 -2.2 -0.4]
+My card PIN has been blocked. cards [ 8.2  0.7 -1.5 -2.  -0. ]
+Can I view my card PIN in the app? cards [ 8.1 -0.9 -1.5 -2.1 -0.1]
+I forgot the PIN I need at the cash machine. cards [ 5.  -0.2 -1.1 -1.9  1.1]
+I need to verify my identity. account_security [-0.3  3.2 -1.1 -1.9  3.6]
+How can I update my telephone number? account_security [-0.1 -0.5 -1.2 -2.   0.1]
+I have forgotten my app passcode. account_security [-0.2  0.3 -0.8 -1.7  1.3]
+How do I close my account? cards [-0.1 -1.1 -0.5 -1.9 -0.6]
+I lost my phone and cannot log in. disputes [-0.   0.3 -0.6 -1.7 -0.1]
+What documents do you need for verification? account_security [-0.3  0.1 -1.3 -2.   5.6]
+How can I change my registered address? cards [-0.5 -0.9 -1.1 -2.1 -0.6]
+I want to change my account name after marriage. disputes [-0.   1.8 -0.1 -1.6  0.3]
+Which currencies can I hold in my account? cards [-1.2 -1.6 -1.6 -2.1 -2.4]
+Can I send a bank transfer to India? transfers_topups [-0.7 -1.1  2.3 -2.6 -2.1]
+Which countries can I transfer money to? transfers_topups [-0.3 -0.9  4.  -2.3 -1.3]
+What countries can I receive transfers from? transfers_topups [-0.2 -1.1  6.5 -2.5 -1.6]
+What currencies can I exchange? fees_fx [-0.3 -1.  -0.8  1.7 -1.5]
+How much does it cost to withdraw money abroad? fees_fx [0.5 1.4 3.  6.8 0.9]
+I got a bad exchange rate when paying with my card. fees_fx [-0.3  2.3 -1.5  3.7 -1.5]
+The exchange rate on my cash withdrawal was wrong. fees_fx [-0.8  0.  -1.1  3.3 -1.4]
+The amount of my card purchase looks wrong because of the exchange rate. fees_fx [-0.6  1.1 -1.2  1.4 -1.4]
+Why was my card payment declined? disputes [ 0.5  0.8 -2.2 -2.2 -1.5]
+I do not recognise this debit on my account. disputes [-1.3  1.7 -2.3 -2.6 -0.7]
+The ATM did not give me my money. disputes [-0.6 -0.2 -0.9 -1.6 -1. ]
+My card payment is pending. disputes [ 0.5  1.1 -2.1 -2.  -1.5]
+Where is my refund? disputes [-2.2 -0.9 -2.8 -3.4 -3. ]
+How do I top up using my credit card? transfers_topups [-0.  -1.6  1.8 -2.3 -2. ]
+My salary deposit has not reached my account. disputes [-0.8  0.4 -0.3 -2.  -1. ]
+How much is the international transfer fee? fees_fx [-0.4 -0.5  2.6  6.2 -1.6]
+I have been charged twice for my purchase. disputes [-1.3  0.5 -2.   0.3 -2.1]
+Can I transfer money to my child? transfers_topups [-0.7 -1.   4.  -2.8 -1.7]
+Can I add money from an American Express card? transfers_topups [-0.3 -1.2  1.5 -2.1 -1.4]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > geometry.py <<'PY'
+import json,numpy as np
+P=json.load(open('probes.json')); M=np.load('probes_M.npz')['M'].astype(float)
+# A shared offset and an option contrast account for the large common components.
+u=M.mean((0,1));u/=np.linalg.norm(u)
+v=(M[:,0]-M[:,3]).mean(0);v-=v@u*u;v/=np.linalg.norm(v)
+X=M-(M@u)[...,None]*u-(M@v)[...,None]*v
+print('residual norm after 2 nuisance',np.percentile(np.linalg.norm(X,axis=-1),[0,25,50,75,100]))
+means={}; n=0
+for k,t in P.items():means[k]=X[n:n+len(t)].mean(0);n+=len(t)
+for k in P: print(k,'norms',np.round(np.linalg.norm(means[k],axis=-1),2))
+print('cos options',np.round(np.corrcoef(X[0]),2))
+for k in ['age','country']:
+ d=means[k][4]-np.mean([means[g][4] for g in ['cards','account','other']],axis=0);d/=np.linalg.norm(d)
+ print(k,'means projections',[(g,np.round(mu@d,2)) for g,mu in means.items()])
+ print('account projections',np.round(X[:,4]@d,2))
+print('option norms',np.linalg.norm(X.mean(0),axis=-1))
+np.savez('geometry.npz',u=u,v=v,X=X)
+PY
+<lab>/.venv/bin/python geometry.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+residual norm after 2 nuisance [  41.7894409   122.89839355  154.86972554  192.48242974 2484.95632827]
+age norms [160.27 118.01 119.21 107.86 110.09]
+country norms [ 42.57 136.18 129.87 101.48 121.87]
+cards norms [149.9  143.09 146.46  87.74 104.5 ]
+account norms [ 73.34 157.94 163.74  87.67 528.67]
+other norms [ 85.76 113.22 426.62 253.77  96.25]
+cos options [[1.   0.94 0.98 0.72 0.96]
+ [0.94 1.   0.96 0.54 0.99]
+ [0.98 0.96 1.   0.73 0.98]
+ [0.72 0.54 0.73 1.   0.62]
+ [0.96 0.99 0.98 0.62 1.  ]]
+age means projections [('age', array([ 45.52, 111.86, 117.32,  53.06, 105.18])), ('country', array([ 15.89,  55.81, 105.46,  91.35,  91.48])), ('cards', array([-137.91,   60.91,  100.76,   68.24,   48.39])), ('account', array([  37.91,   28.88,   90.66,   69.79, -507.52])), ('other', array([  67.72,  -92.23, -377.63, -190.92,   92.36]))]
+account projections [ 1.83460e+02  1.29890e+02  1.18940e+02 -5.06000e+00  1.16610e+02
+  1.60760e+02  8.81100e+01  2.62100e+01  1.39030e+02  9.38700e+01
+  1.96900e+01  3.91600e+01  1.11340e+02  1.34040e+02  8.24800e+01
+  9.31300e+01  1.24570e+02  1.09780e+02  8.14700e+01  1.03790e+02
+  6.59600e+01  1.07130e+02  1.18630e+02  1.07070e+02  7.39600e+01
+  1.07540e+02  1.60410e+02  1.19530e+02  1.04110e+02  1.05170e+02
+  7.93300e+01  9.20800e+01  1.36630e+02  8.62800e+01  1.00400e+02
+  9.88500e+01  5.94500e+01  1.27130e+02  1.10760e+02  4.07600e+01
+ -2.11600e+01 -5.88000e+00 -6.30360e+02 -1.60332e+03 -5.79800e+01
+ -7.08390e+02  1.25980e+02  3.80000e-01 -1.89691e+03  7.95400e+01
+  5.10000e-01  6.32600e+01  8.46100e+01  1.11820e+02  9.01200e+01
+  1.30410e+02  1.11460e+02  9.63100e+01  9.89200e+01  9.19900e+01
+  1.08600e+02  1.20270e+02  1.04440e+02  1.12130e+02 -1.28000e+00
+  5.66000e+01  1.06250e+02  8.88600e+01  6.56900e+01  9.59500e+01
+  1.10850e+02]
+country means projections [('age', array([-16.49, 109.66, 103.4 ,  17.97,  90.11])), ('country', array([  6.81,  97.18, 125.53,  97.94, 113.86])), ('cards', array([-144.  ,  104.68,  131.7 ,   72.74,   78.69])), ('account', array([  55.35,   83.2 ,  133.7 ,   76.26, -515.06])), ('other', array([  50.98, -105.67, -423.36, -238.02,   79.92]))]
+account projections [   97.18   109.47    68.35    40.22   133.95   102.58   108.42    54.04
+    73.59   113.29    79.88    86.2    119.65   129.33    84.75   135.01
+   121.68   141.34   106.6    123.32    53.53   142.25   143.97   138.21
+   102.24   131.45   111.3    124.22   149.91   130.31   124.93   146.97
+   106.42   147.85   146.64   155.29   121.64   139.16   136.42   112.48
+    39.17    51.32  -658.98 -1697.23     6.34  -765.3    113.33    66.11
+ -2024.92   132.22    48.95   -38.87    31.37   131.81   111.39    90.19
+   137.16   116.37   115.2    122.74   102.37    67.88   139.52   102.98
+  -136.95    66.62   141.74    68.18    16.8     96.48   115.45]
+option norms [50.06593042 71.52089548 37.17410405 50.06593042 31.06896431]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > directions.py <<'PY'
+import numpy as np,json
+P=json.load(open('probes.json')); M=np.load('probes_M.npz')['M'].astype(float)
+# Use shared scale, option contrast, and a relevance contrast as nuisance axes.
+basis=[]
+for raw in [M.mean((0,1)),(M[:,0]-M[:,3]).mean(0),(M[43:51,4]-M[43:51,1]).mean(0)]:
+ d=raw.copy()
+ for b in basis:d-=d@b*b
+ d/=np.linalg.norm(d);basis.append(d)
+B=np.array(basis);X=M-(M@B.T)@B
+print('norms',np.percentile(np.linalg.norm(X,axis=-1),[0,25,50,75,100]))
+means={};n=0
+for k,t in P.items():means[k]=X[n:n+len(t)].mean(0);n+=len(t)
+for k in ['age','country']:
+ d=means[k][4]-(means['cards'][4]+means['other'][4])/2;d/=np.linalg.norm(d)
+ print(k,'projections per group',[(g,np.round(mu@d,1)) for g,mu in means.items()])
+ print('account',np.round(X[:,4]@d,1))
+print('option mean norms',np.linalg.norm(X.mean(0),axis=-1))
+print('cos options',np.round(np.corrcoef(X[0]),2))
+np.savez('directions.npz',B=B,X=X)
+PY
+<lab>/.venv/bin/python directions.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+norms [ 18.86283221  60.50785208  99.42252444 146.00091082 403.36666458]
+age projections per group [('age', array([130.4,  43.2,  64.4,  76.3,  70.1])), ('country', array([ 15. , -55.1,  -4.5,   3.7,  -9.6])), ('cards', array([-33.5, -68.8, -40.2,  -9. , -42.7])), ('account', array([-37.4, -93.9, -63.1,  -9.8, -93.9])), ('other', array([39.6, 14.6, -0.6, 42.1, 44. ]))]
+account [ 244.2   89.6  133.   -75.9   -0.6  176.8  -21.5  -21.3  184.4   -7.9
+  -96.1  -68.7   28.2   73.7   25.4  -52.9   31.2  -36.3  -19.5   12.2
+   75.3  -31.4  -19.2  -38.6  -26.7  -15.1  171.7   11.7  -59.1  -31.5
+  -73.2  -86.2   82.9  -92.1  -77.2  -82.7 -101.2   33.7  -24.  -130.3
+ -109.  -116.   -71.2 -196.6 -136.8  -30.7   93.7 -126.1 -194.9  -86.7
+  -73.2  219.2  115.8   -7.1  -18.3  139.4  -12.6  -22.1  -14.6  -52.8
+   28.3  136.7  -47.1   33.3  260.   -21.9  -48.9   61.3   99.9   13.6
+   17.3]
+country projections per group [('age', array([-110.3,    0.8,  -24.2,  -74.2,  -12. ])), ('country', array([-28.7,  81.3,  34.2, -13.2,  45.6])), ('cards', array([-11.4,  64.3,  26.3, -34.7,  50.2])), ('account', array([ -1.6,  91.7,  52.9, -26.9,  91.7])), ('other', array([-54.7,  12.5, -13.3, -53.2, -38.9]))]
+account [-109.8  -18.   -91.8   99.6   19.9  -73.5   14.5   92.7  -86.3   32.
+  125.6   96.1   31.2   32.7   11.6   65.9  -31.8   31.8   48.3   64.2
+   38.3   61.2   25.7   27.5   55.4   32.6  -33.6  -25.1   67.     9.5
+   53.4   70.3  -85.6   98.8   37.6   82.2  102.5   50.8   23.8  108.6
+  125.9   86.    98.7  107.8  116.3   74.7   33.1  108.4  109.3   65.9
+  117.8 -167.1 -113.6   24.7   22.5  -29.2   44.1    5.9   -1.     7.5
+  -45.   -93.    32.7  -52.5 -225.9  -22.9   30.5  -47.3 -108.2  -30.4
+   -9.9]
+option mean norms [46.9139723  56.40837171 22.82541329 46.9139723  23.48639999]
+cos options [[1.   0.96 0.98 0.86 0.96]
+ [0.96 1.   0.98 0.8  0.99]
+ [0.98 0.98 1.   0.88 0.99]
+ [0.86 0.8  0.88 1.   0.83]
+ [0.96 0.99 0.99 0.83 1.  ]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The marker vectors contain large shared components. These components obscure the smaller differences between topics. I am checking those directions before I build the new rule. The supplied evidence labels will be used only for validation.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('probes_M.npz')['M'].astype(float); B=[]
+for i in [25,26,27,28,29]:
+ for j in range(5):
+  d=M[i,j].copy()
+  for b in B:d-=d@b*b
+  norm=np.linalg.norm(d);B.append(d/norm)
+  X=M-(M@np.array(B).T)@np.array(B)
+  print(i,j,'new norm',round(norm,3),'residual',np.round(np.percentile(np.linalg.norm(X,axis=-1),[25,50,95]),3))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 11ms:
+25 0 new norm 10698.097 residual [1180.724 1963.029 3500.138]
+25 1 new norm 1085.602 residual [146.223 273.348 874.68 ]
+25 2 new norm 344.859 residual [ 64.008  93.93  295.547]
+25 3 new norm 96.15 residual [ 49.89   71.074 235.2  ]
+25 4 new norm 10.093 residual [ 47.405  65.795 198.288]
+26 0 new norm 178.354 residual [ 35.167  49.915 151.911]
+26 1 new norm 41.482 residual [ 32.2    45.844 134.768]
+26 2 new norm 9.704 residual [ 30.399  44.595 130.339]
+26 3 new norm 22.584 residual [ 26.49  39.28 129.97]
+26 4 new norm 9.928 residual [ 24.703  33.932 108.123]
+27 0 new norm 52.664 residual [ 21.115  27.248 107.27 ]
+27 1 new norm 22.362 residual [ 19.06   24.762 104.662]
+27 2 new norm 9.422 residual [ 18.645  24.448 102.263]
+27 3 new norm 16.959 residual [17.793 22.516 84.727]
+27 4 new norm 5.243 residual [16.749 21.91  84.659]
+28 0 new norm 36.605 residual [16.347 21.098 62.702]
+28 1 new norm 19.238 residual [14.733 19.364 57.903]
+28 2 new norm 3.81 residual [14.528 18.965 57.492]
+28 3 new norm 5.295 residual [14.189 18.872 57.282]
+28 4 new norm 5.039 residual [13.922 18.724 57.156]
+29 0 new norm 18.572 residual [13.722 18.335 55.318]
+29 1 new norm 7.176 residual [13.22  17.925 54.294]
+29 2 new norm 3.946 residual [12.485 17.267 54.185]
+29 3 new norm 6.088 residual [12.159 17.083 54.111]
+29 4 new norm 3.191 residual [12.127 16.908 53.841]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from scorer import load
+S=load('scorer_in.npz');M=np.load('probes_M.npz')['M'];H=(M-M.mean(-1,keepdims=True))/np.sqrt(M.var(-1,keepdims=True)+1e-5);A=(H*S['ln_w']+S['ln_b'])@S['W1']+S['b1']
+# Inspect hidden unit contrasts. No weights are fitted.
+for part in [slice(0,10),slice(10,25)]:
+ d=A[part,4].mean(0)-A[25:,4].mean(0)
+ for j in np.argsort(d)[-10:][::-1]:print(j,'contrast',round(float(d[j]),3),'targets',np.round(np.percentile(A[part,4,j],[0,50,100]),2),'controls',np.round(np.percentile(A[25:,:,j],[0,50,100]),2),'wout',S['W2'][j,0])
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 610ms:
+414 contrast 0.228 targets [ 3.93  8.48 12.32] controls [-3.24  8.31 25.53] wout 0.048614502
+714 contrast 0.168 targets [ 3.33  7.06 10.23] controls [-2.38  6.9  21.83] wout 0.03567505
+115 contrast 0.148 targets [ 5.97  8.39 10.37] controls [ 1.96  8.28 17.24] wout 0.012626648
+292 contrast 0.147 targets [ 5.92  8.32 10.28] controls [ 1.85  8.23 16.94] wout 0.012397766
+773 contrast 0.141 targets [ 5.74  8.68 11.14] controls [ 1.    8.55 20.13] wout 0.022216797
+576 contrast 0.073 targets [3.87 3.98 3.99] controls [2.98 3.94 4.  ] wout 0.010345459
+998 contrast 0.067 targets [3.27 4.23 4.98] controls [1.55 4.19 7.5 ] wout 0.00491333
+215 contrast 0.032 targets [6.22 6.32 6.44] controls [6.19 6.28 6.55] wout 0.0013523102
+743 contrast 0.03 targets [2.72 2.85 2.87] controls [2.43 2.82 3.17] wout 0.0012483597
+323 contrast 0.026 targets [3.13 3.17 3.23] controls [3.06 3.14 3.35] wout -0.000910759
+414 contrast 1.32 targets [ 7.21  9.54 11.78] controls [-3.24  8.31 25.53] wout 0.048614502
+714 contrast 1.049 targets [6.   7.92 9.81] controls [-2.38  6.9  21.83] wout 0.03567505
+773 contrast 0.837 targets [ 7.85  9.35 10.8 ] controls [ 1.    8.55 20.13] wout 0.022216797
+292 contrast 0.714 targets [ 7.66  8.86 10.01] controls [ 1.85  8.23 16.94] wout 0.012397766
+115 contrast 0.713 targets [ 7.7   8.92 10.1 ] controls [ 1.96  8.28 17.24] wout 0.012626648
+367 contrast 0.457 targets [0.21 1.16 2.1 ] controls [-3.74  0.68  9.13] wout 0.028121948
+742 contrast 0.382 targets [-4.54 -3.76 -3.  ] controls [-7.47 -4.18  1.95] wout 0.0141067505
+29 contrast 0.303 targets [-11.   -10.    -8.86] controls [-13.7  -10.55   1.18] wout 0.014671326
+998 contrast 0.294 targets [3.97 4.43 4.88] controls [1.55 4.19 7.5 ] wout 0.00491333
+843 contrast 0.241 targets [-10.64  -9.87  -8.99] controls [-12.71 -10.27  -1.38] wout 0.011642456
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from scorer import load
+S=load('scorer_in.npz');W=S['extra_W0'];
+for i in [0,5,9,16]:print(i,[(j,round(W[j,i],3)) for j in np.argsort(abs(W[:,i]))[-12:]])
+print('W1 singular values',np.round(np.linalg.svd(S['W1'],compute_uv=False)[:30],2))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 836ms:
+0 [(np.int64(704), np.float64(-0.05)), (np.int64(408), np.float64(-0.05)), (np.int64(395), np.float64(0.051)), (np.int64(217), np.float64(-0.052)), (np.int64(238), np.float64(-0.054)), (np.int64(1008), np.float64(0.054)), (np.int64(221), np.float64(0.055)), (np.int64(505), np.float64(0.056)), (np.int64(286), np.float64(-0.061)), (np.int64(330), np.float64(0.064)), (np.int64(597), np.float64(-0.071)), (np.int64(734), np.float64(-0.072))]
+5 [(np.int64(97), np.float64(4.596)), (np.int64(854), np.float64(4.624)), (np.int64(195), np.float64(4.742)), (np.int64(761), np.float64(-4.751)), (np.int64(609), np.float64(-4.866)), (np.int64(344), np.float64(5.087)), (np.int64(541), np.float64(5.112)), (np.int64(675), np.float64(5.201)), (np.int64(659), np.float64(-5.473)), (np.int64(843), np.float64(5.568)), (np.int64(848), np.float64(5.595)), (np.int64(136), np.float64(-6.013))]
+9 [(np.int64(212), np.float64(-6.502)), (np.int64(155), np.float64(-6.572)), (np.int64(203), np.float64(6.6)), (np.int64(904), np.float64(6.766)), (np.int64(356), np.float64(6.826)), (np.int64(709), np.float64(-6.861)), (np.int64(735), np.float64(6.861)), (np.int64(927), np.float64(-6.883)), (np.int64(268), np.float64(-6.932)), (np.int64(259), np.float64(7.149)), (np.int64(489), np.float64(-8.138)), (np.int64(100), np.float64(-9.947))]
+16 [(np.int64(260), np.float64(3.487)), (np.int64(805), np.float64(3.495)), (np.int64(399), np.float64(3.573)), (np.int64(668), np.float64(3.578)), (np.int64(74), np.float64(-3.686)), (np.int64(46), np.float64(3.699)), (np.int64(928), np.float64(-3.788)), (np.int64(609), np.float64(-3.812)), (np.int64(632), np.float64(-3.833)), (np.int64(806), np.float64(-3.959)), (np.int64(650), np.float64(-3.975)), (np.int64(52), np.float64(-4.015))]
+W1 singular values [7.3  4.28 3.46 2.86 2.7  2.59 2.35 2.24 2.18 2.11 2.08 2.01 1.98 1.88
+ 1.85 1.75 1.72 1.7  1.66 1.63 1.61 1.57 1.56 1.54 1.52 1.49 1.46 1.44
+ 1.42 1.4 ]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python embed.py neutral_M.npz 'Hello, I need some help please.' 'Could you assist me with a question?' 'Thank you very much.' 'Good morning.' 'I would like some information.' 'Please explain this to me.' 'I have a question about your service.' 'Can someone help me out?' 'Hi there.' 'I need to ask something.' 'Please give me more details.' 'Thanks for your assistance.'" in $WSROOT/laya/s0/astra-r0/step3
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from scorer import *
+M=np.load('probes_M.npz')['M'];S=load('scorer_in.npz');V=M@S['extra_W0'][:,:5]+S['extra_b0'][:5]
+for j in range(5): print(j,'per opt mean',np.round(V[:,:,j].mean(0),1),'std',np.round(V[:,:,j].std(0),1))
+print('means',np.round(V[:3],1))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 958ms:
+0 per opt mean [-0.8  0.   1.3 -0.5  2.4] std [4.2 3.9 3.4 4.  3.2]
+1 per opt mean [-3.1  4.9  4.4  6.1  4.6] std [3.6 2.5 1.9 1.4 1.9]
+2 per opt mean [-1.8  0.7  4.1  5.8  3.4] std [4.8 3.8 2.8 3.4 3.2]
+3 per opt mean [-4.6  2.9 -0.2  7.2  2.4] std [6.3 4.8 5.1 5.4 5.2]
+4 per opt mean [-2.8  3.   1.6  6.5 -1.2] std [2.7 2.3 2.2 3.  2.1]
+means [[[-7.  -5.2 -9.1  2.2 -2.6]
+  [-6.2  4.6 -4.6 11.8  4.1]
+  [-3.1  5.1 -1.5 11.1  4.9]
+  [-0.   6.3 -2.4 21.9 14.9]
+  [-1.9  3.6 -4.3 12.4  0.2]]
+
+ [[ 1.4 -3.7 -4.4  3.6 -0.2]
+  [ 0.3  4.3 -2.4  7.6  3. ]
+  [ 2.7  6.3  1.9  6.5  3.7]
+  [-2.6  6.9  2.6 15.8 10.5]
+  [ 2.3  6.4  2.3 10.2  0.1]]
+
+ [[-6.5 -3.4 -4.8 -3.5 -5.3]
+  [-6.9  3.7 -1.9  2.9 -0.1]
+  [-6.6  4.4  0.7  5.2  4. ]
+  [-5.4  5.  -2.2 15.9 14.1]
+  [-4.4  4.7  0.2  6.6 -2.1]]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 26626ms:
+W1104 12:03:21.794000 47252 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote neutral_M.npz 12 messages
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > assess_geometry.py <<'PY'
+import numpy as np,json
+M=np.load('probes_M.npz')['M'].astype(float);N=np.load('neutral_M.npz')['M'].astype(float)
+# Remove changes between generic greetings, retaining the department contrast.
+B=[]
+for raw in [N.mean((0,1))]+[N[i,j]-N[0,j] for i in range(1,len(N)) for j in range(5)]:
+ d=raw.copy()
+ for _ in range(2):
+  for b in B:d-=d@b*b
+ if np.linalg.norm(d)>1e-6:B.append(d/np.linalg.norm(d))
+B=np.array(B)
+X=M-(M@B.T)@B
+print('residual norms',np.percentile(np.linalg.norm(X,axis=-1),[0,25,50,75,100]))
+print('option means norms',np.linalg.norm(X.mean(0),axis=-1))
+# Departments are selected by pairwise mean-vector comparisons.
+O=X.mean(0)
+for j in range(4):
+ d=O[4]-O[j];d/=np.linalg.norm(d);c=(O[4]+O[j])@d/2
+ print('option4 v',j, 'mean',np.round(O@d-c,2),'range4',np.round(np.percentile(X[:,4]@d-c,[0,25,50,100]),2),'rangej',np.round(np.percentile(X[:,j]@d-c,[0,25,50,100]),2))
+neg=[X[25:31,4].mean(0),X[31:33,4].mean(0),X[33:39,4].mean(0),X[39:43,4].mean(0),X[43:51,4].mean(0),X[51:56,4].mean(0),X[56:60,4].mean(0),X[60:,4].mean(0)]
+pos=[X[:10,4].mean(0),X[10:25,4].mean(0)]
+R=[]
+for p in pos:
+ ds=np.array([2*(p-n)/np.sum((p-n)**2) for n in neg]);bs=np.array([-(p+n)@d/2 for n,d in zip(neg,ds)])
+ R.append((X@ds.T+bs).min(-1))
+R=np.array(R).max(0)
+P=json.load(open('probes.json'))
+for t,r in zip(sum(P.values(),[]),R): print(t,np.round(r,2))
+np.savez('chosen_geometry.npz',B=B,X=X)
+PY
+<lab>/.venv/bin/python assess_geometry.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+residual norms [  6.12433223  10.60688218  15.23523199  26.1278048  417.65092745]
+option means norms [15.7760368  14.0990257  24.8979349  20.54655116 17.27237021]
+option4 v 0 mean [-8.24  3.15 11.67  8.72  8.24] range4 [  0.31   1.66   2.65 154.23] rangej [-14.58 -11.07  -9.69  13.25]
+option4 v 1 mean [-2.38 -5.4   6.55  4.57  5.4 ] range4 [ -2.17  -1.08   0.29 133.21] rangej [-10.5   -9.51  -8.01  52.22]
+option4 v 2 mean [10.71  7.02 -5.98  4.09  5.98] range4 [-246.15   14.03   15.11   17.55] rangej [-257.49    9.08   10.93   14.01]
+option4 v 3 mean [ 7.21  5.94  4.92 -6.62  6.62] range4 [-22.71   6.12   6.86  21.54] rangej [-37.33 -10.84  -3.98  21.8 ]
+How young can someone be to register for an account? [ 0.9   0.89  0.12 -4.17  0.91]
+Are teenagers allowed to join your banking service? [ 0.29  0.32  0.29 -2.47  0.38]
+Can a fourteen year old become a customer? [ 0.93  0.91  1.01 -2.43  0.97]
+I would like to open an account for my daughter. [-1.34 -1.26 -0.4  -1.08 -0.77]
+Does your bank offer accounts for children? [-0.1  -0.34 -0.23 -0.37 -0.17]
+Am I too young to sign up? [ 0.96  0.95  0.71 -2.92  0.96]
+Is there a minimum age to use your service? [-0.64 -0.81 -0.51 -0.54 -0.1 ]
+Can a parent register their son for an account? [-1.5  -1.47 -1.37 -1.11 -0.73]
+I am under eighteen. Can I apply for a card? [ 0.97  0.88  0.39 -3.05 -0.02]
+Who is eligible to open an account with you? [-1.23 -1.03 -0.34 -0.91 -0.25]
+Which countries are eligible to register with your bank? [ 0.12  0.11 -0.22 -0.58  0.3 ]
+Can residents of Canada sign up for your service? [-1.25 -1.32 -0.47 -0.83 -0.33]
+I live in France. Am I allowed to open an account? [ 0.02 -0.07  0.32 -0.47  0.89]
+Can I become a customer if I reside outside Britain? [ 0.12  0.13 -0.21 -2.69  0.29]
+Which nations do you operate in? [ 0.23  0.25  0.35 -0.    0.52]
+Are your services available in Australia? [-0.87 -0.54 -0.05 -0.5   0.08]
+Can someone living in Brazil order your debit card? [-0.51 -0.98 -0.48 -0.54 -0.4 ]
+Is your card available for residents of Switzerland? [-0.97 -1.48 -1.03 -1.18 -0.56]
+What regions do you offer accounts in? [-0.99 -1.12 -0.55 -0.66 -0.08]
+Can I join if my home country is not in Europe? [-0.17 -0.94 -0.83 -0.94 -0.66]
+Where in the world can I use your banking service? [-0.59 -0.69 -0.48 -0.74 -0.55]
+Which countries accept your payment cards? [ 0.1  -0.08 -0.6  -0.91 -0.46]
+Do you offer your card in Asia? [0.46 0.34 0.39 0.01 0.32]
+Where are your services available? [-0.78 -1.05 -0.78 -1.03 -0.59]
+What locations do you serve? [-0.89 -1.05 -0.44 -0.76 -0.18]
+How do I order a replacement debit card? [-0.64 -0.99 -1.27 -1.31 -1.23]
+Where can you ship my new card? [ 0.77  0.76  0.7  -1.02  0.88]
+Can my card be delivered to an address in Germany? [-0.82 -0.91 -0.79 -0.44 -0.66]
+Can I choose the delivery day for my card? [-1.04 -0.93 -1.09 -0.98 -0.95]
+How long does card delivery to Canada take? [-0.89 -0.67 -0.29 -0.44 -0.27]
+Can you send my card to my hotel abroad? [-1.51 -1.43 -1.18 -1.21 -0.76]
+Which cash machines accept my card? [-1.53 -0.94 -0.58 -0.9  -0.65]
+Can I use my card at a local ATM? [-1.24 -1.52 -1.38 -0.93 -1.35]
+How can I activate my new physical card? [-1.59 -1.85 -1.62 -1.55 -1.53]
+How do disposable virtual cards work? [-0.84 -1.79 -1.68 -1.73 -1.56]
+How can I add my card to Apple Pay? [-1.6  -2.08 -1.88 -1.59 -1.63]
+My contactless card does not work. [-1.5  -1.45 -1.69 -1.58 -1.53]
+I lost my debit card and need another one. [-0.3  -1.32 -0.9  -1.4  -0.97]
+Can I pay online using my card? [-0.89 -0.81 -0.75 -0.91 -0.59]
+How can I change the PIN for my card? [-1.82 -2.08 -1.86 -1.89 -1.43]
+My card PIN has been blocked. [-1.81 -1.79 -1.58 -1.43 -1.28]
+Can I view my card PIN in the app? [-1.68 -1.58 -1.29 -1.3  -0.84]
+I forgot the PIN I need at the cash machine. [-1.8  -1.76 -1.24 -1.16 -3.05]
+I need to verify my identity. [-0.5  -0.58 -1.09 -1.35 -8.12]
+How can I update my telephone number? [-1.43 -1.46 -1.37 -1.34 -0.89]
+I have forgotten my app passcode. [-1.7  -1.78 -1.25 -1.35 -3.62]
+How do I close my account? [ 0.24 -0.11 -0.19 -1.18  0.38]
+I lost my phone and cannot log in. [-1.2  -1.11 -0.83 -1.14 -0.79]
+What documents do you need for verification? [-0.41 -0.25 -0.83 -1.51 -9.82]
+How can I change my registered address? [-0.5  -0.91 -0.66 -1.11 -0.48]
+I want to change my account name after marriage. [-0.92 -1.19 -0.68 -0.74 -0.5 ]
+Which currencies can I hold in my account? [ 0.89  0.58  0.58 -2.93 -1.82]
+Can I send a bank transfer to India? [ 0.15 -0.23 -8.64 -4.5  -1.62]
+Which countries can I transfer money to? [-0.27 -0.12 -8.31 -1.77 -0.37]
+What countries can I receive transfers from? [ -0.4   -0.46 -10.07  -2.86  -0.93]
+What currencies can I exchange? [ 0.37  0.24  0.32 -0.69 -0.65]
+How much does it cost to withdraw money abroad? [ -0.91  -0.98  -0.89 -12.33  -1.05]
+I got a bad exchange rate when paying with my card. [-0.62 -1.9  -0.95 -0.24 -1.1 ]
+The exchange rate on my cash withdrawal was wrong. [-0.17  0.04 -0.15  0.11 -0.44]
+The amount of my card purchase looks wrong because of the exchange rate. [-1.01 -3.03 -1.3  -0.98 -1.11]
+Why was my card payment declined? [ 0.07 -1.42 -1.78 -1.48 -0.45]
+I do not recognise this debit on my account. [-0.18 -4.35 -2.36 -3.38 -0.71]
+The ATM did not give me my money. [-0.79 -1.13 -0.77 -0.52 -0.7 ]
+My card payment is pending. [-0.49 -2.65 -1.21 -1.25 -1.  ]
+Where is my refund? [ 0.47  0.9  -0.94 -2.6  -1.53]
+How do I top up using my credit card? [-0.2  -0.91 -6.06 -1.93 -1.19]
+My salary deposit has not reached my account. [-0.4  -0.51 -0.45 -0.83 -0.39]
+How much is the international transfer fee? [ -1.19  -1.1   -0.85 -11.93  -1.55]
+I have been charged twice for my purchase. [-0.43 -0.03 -1.2   0.09 -1.68]
+Can I transfer money to my child? [-0.05  0.   -8.97 -3.89 -0.63]
+Can I add money from an American Express card? [-0.21 -0.55 -3.59 -0.96 -0.09]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('probes_M.npz')['M'].astype(float);B=list(np.load('chosen_geometry.npz')['B'])
+# Remove strong, unrelated match-strength variation, using the identity check example.
+d=M[43,4]-M[43,2]
+for _ in range(2):
+ for b in B:d-=d@b*b
+B.append(d/np.linalg.norm(d));B=np.array(B);X=M-(M@B.T)@B
+print('norms',np.percentile(np.linalg.norm(X,axis=-1),[0,25,50,75,100])); O=X.mean(0)
+for j in range(4):
+ d=O[4]-O[j];d/=np.linalg.norm(d);c=(O[4]+O[j])@d/2
+ print('option',j,'range4',np.percentile(X[:,4]@d-c,[0,25,50,100]),'rangej',np.percentile(X[:,j]@d-c,[0,25,50,100]))
+np.savez('final_geometry.npz',B=B,X=X)
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+norms [ 6.12089328 10.49953538 15.10701027 24.36323044 81.94324063]
+option 0 range4 [ 4.8125376   6.24168398  6.6673559  16.79618718] rangej [-11.79662649  -8.36140541  -7.33209193   5.01376204]
+option 1 range4 [-0.85139127  3.39640499  3.98250484 17.27949793] rangej [-7.40887863 -5.9774445  -5.22781984 -0.69693919]
+option 2 range4 [-5.15212474  3.0133253   3.5914056   6.44732792] rangej [-8.91031829 -3.89476454 -3.50486087 -1.03850443]
+option 3 range4 [-22.00169681   6.69758364   7.52303491  15.40921502] rangej [-36.38334837  -9.92632168  -3.37314005   4.74053138]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+M=np.load('probes_M.npz')['M'].astype(float);B=list(np.load('final_geometry.npz')['B'])
+for i,j,k in [(56,3,4),(33,0,1),(52,2,4),(64,1,4)]:
+ d=M[i,j]-M[i,k]
+ for _ in range(2):
+  for b in B:d-=d@b*b
+ print('axis norm',np.linalg.norm(d));B.append(d/np.linalg.norm(d))
+B=np.array(B);X=M-(M@B.T)@B
+print('norms',np.percentile(np.linalg.norm(X,axis=-1),[0,25,50,75,100])); O=X[:25].mean(0)
+for j in range(4):
+ d=O[4]-O[j];d/=np.linalg.norm(d);c=(O[4]+O[j])@d/2
+ print('option',j,'range4',np.percentile(X[:,4]@d-c,[0,25,50,100]),'rangej',np.percentile(X[:,j]@d-c,[0,25,50,100]))
+np.savez('semantic_geometry.npz',B=B,X=X)
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+axis norm 71.80439884020349
+axis norm 23.22611266936425
+axis norm 29.841806170332983
+axis norm 55.81095722628307
+norms [ 6.06095528 10.11694064 14.18132511 21.0547414  62.51306605]
+option 0 range4 [ 1.58666406  5.04518441  5.51144818 10.32458826] rangej [-9.4472274  -7.34363704 -6.23311234  1.97633557]
+option 1 range4 [0.30277827 2.99450785 3.54466677 9.7229172 ] rangej [-7.61606585 -6.26895143 -5.43926129  2.5431432 ]
+option 2 range4 [-3.42291699  2.19480255  2.92914865  6.07004669] rangej [-7.93064774 -4.12894272 -3.63065887  0.28271278]
+option 3 range4 [-0.93562802  3.64951634  4.47685173  7.18850144] rangej [-10.79741097  -6.03437974  -4.57988341   5.09151185]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,json
+X=np.load('semantic_geometry.npz')['X'];P=json.load(open('probes.json'));texts=sum(P.values(),[])
+neg=[X[a:b,4].mean(0) for a,b in [(25,31),(31,33),(33,39),(39,43),(43,51),(51,56),(56,60),(60,71)]]
+pos=[X[:10,4].mean(0),X[10:25,4].mean(0)]
+R=[]
+for p in pos:
+ ds=np.array([2*(p-n)/np.sum((p-n)**2) for n in neg]);bs=np.array([-(p+n)@d/2 for n,d in zip(neg,ds)])
+ R.append((X@ds.T+bs).min(-1))
+R=np.array(R).max(0)
+for t,r in zip(texts,R):print(t,round(r[4],2))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+How young can someone be to register for an account? 0.56
+Are teenagers allowed to join your banking service? -0.21
+Can a fourteen year old become a customer? 2.61
+I would like to open an account for my daughter. -0.73
+Does your bank offer accounts for children? -0.18
+Am I too young to sign up? 0.03
+Is there a minimum age to use your service? -0.2
+Can a parent register their son for an account? -0.8
+I am under eighteen. Can I apply for a card? -0.42
+Who is eligible to open an account with you? -0.27
+Which countries are eligible to register with your bank? 0.15
+Can residents of Canada sign up for your service? -0.31
+I live in France. Am I allowed to open an account? 0.94
+Can I become a customer if I reside outside Britain? -0.31
+Which nations do you operate in? 0.53
+Are your services available in Australia? 0.02
+Can someone living in Brazil order your debit card? -0.39
+Is your card available for residents of Switzerland? -0.52
+What regions do you offer accounts in? -0.14
+Can I join if my home country is not in Europe? -0.63
+Where in the world can I use your banking service? -0.41
+Which countries accept your payment cards? -0.53
+Do you offer your card in Asia? 0.29
+Where are your services available? -0.57
+What locations do you serve? -0.18
+How do I order a replacement debit card? -1.18
+Where can you ship my new card? -0.05
+Can my card be delivered to an address in Germany? -0.65
+Can I choose the delivery day for my card? -1.13
+How long does card delivery to Canada take? -0.26
+Can you send my card to my hotel abroad? -0.7
+Which cash machines accept my card? -0.69
+Can I use my card at a local ATM? -1.31
+How can I activate my new physical card? -1.51
+How do disposable virtual cards work? -1.57
+How can I add my card to Apple Pay? -1.6
+My contactless card does not work. -1.49
+I lost my debit card and need another one. -0.98
+Can I pay online using my card? -0.57
+How can I change the PIN for my card? -1.36
+My card PIN has been blocked. -1.2
+Can I view my card PIN in the app? -0.78
+I forgot the PIN I need at the cash machine. -2.03
+I need to verify my identity. -1.5
+How can I update my telephone number? -0.86
+I have forgotten my app passcode. -2.27
+How do I close my account? -0.47
+I lost my phone and cannot log in. -0.73
+What documents do you need for verification? -1.31
+How can I change my registered address? -0.51
+I want to change my account name after marriage. -0.43
+Which currencies can I hold in my account? -0.55
+Can I send a bank transfer to India? -0.98
+Which countries can I transfer money to? -0.42
+What countries can I receive transfers from? -0.93
+What currencies can I exchange? -1.61
+How much does it cost to withdraw money abroad? -0.99
+I got a bad exchange rate when paying with my card. -1.11
+The exchange rate on my cash withdrawal was wrong. -0.47
+The amount of my card purchase looks wrong because of the exchange rate. -1.07
+Why was my card payment declined? -0.45
+I do not recognise this debit on my account. -0.88
+The ATM did not give me my money. -0.69
+My card payment is pending. -0.97
+Where is my refund? 1.77
+How do I top up using my credit card? -0.72
+My salary deposit has not reached my account. -0.36
+How much is the international transfer fee? -1.22
+I have been charged twice for my purchase. -0.94
+Can I transfer money to my child? -0.63
+Can I add money from an American Express card? -0.11
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np,json
+X=np.load('semantic_geometry.npz')['X'];U=X/np.linalg.norm(X,axis=-1,keepdims=True);P=json.load(open('probes.json'));texts=sum(P.values(),[])
+neg=[U[a:b,4].mean(0) for a,b in [(25,31),(31,33),(33,39),(39,43),(43,51),(51,56),(56,60),(60,71)]]
+pos=[U[:10,4].mean(0),U[10:25,4].mean(0)]
+neg=[n/np.linalg.norm(n) for n in neg];pos=[p/np.linalg.norm(p) for p in pos]
+R=[]
+for p in pos:
+ ds=np.array([p-n for n in neg]);R.append((U@ds.T).min(-1))
+R=np.array(R).max(0)
+for t,r in zip(texts,R):print(t,round(r[4],3))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+How young can someone be to register for an account? -0.043
+Are teenagers allowed to join your banking service? -0.092
+Can a fourteen year old become a customer? 0.081
+I would like to open an account for my daughter. -0.062
+Does your bank offer accounts for children? 0.132
+Am I too young to sign up? -0.064
+Is there a minimum age to use your service? 0.101
+Can a parent register their son for an account? -0.036
+I am under eighteen. Can I apply for a card? -0.119
+Who is eligible to open an account with you? -0.015
+Which countries are eligible to register with your bank? -0.021
+Can residents of Canada sign up for your service? 0.098
+I live in France. Am I allowed to open an account? 0.11
+Can I become a customer if I reside outside Britain? -0.088
+Which nations do you operate in? 0.173
+Are your services available in Australia? 0.174
+Can someone living in Brazil order your debit card? -0.119
+Is your card available for residents of Switzerland? -0.15
+What regions do you offer accounts in? 0.164
+Can I join if my home country is not in Europe? 0.011
+Where in the world can I use your banking service? -0.0
+Which countries accept your payment cards? -0.043
+Do you offer your card in Asia? 0.017
+Where are your services available? 0.033
+What locations do you serve? 0.112
+How do I order a replacement debit card? -0.158
+Where can you ship my new card? -0.078
+Can my card be delivered to an address in Germany? -0.291
+Can I choose the delivery day for my card? -0.135
+How long does card delivery to Canada take? -0.161
+Can you send my card to my hotel abroad? -0.247
+Which cash machines accept my card? -0.411
+Can I use my card at a local ATM? -0.574
+How can I activate my new physical card? -0.176
+How do disposable virtual cards work? -0.188
+How can I add my card to Apple Pay? -0.203
+My contactless card does not work. -0.175
+I lost my debit card and need another one. -0.094
+Can I pay online using my card? -0.047
+How can I change the PIN for my card? -0.419
+My card PIN has been blocked. -0.304
+Can I view my card PIN in the app? -0.363
+I forgot the PIN I need at the cash machine. -0.313
+I need to verify my identity. -0.22
+How can I update my telephone number? -0.186
+I have forgotten my app passcode. -0.25
+How do I close my account? -0.115
+I lost my phone and cannot log in. -0.097
+What documents do you need for verification? -0.169
+How can I change my registered address? -0.161
+I want to change my account name after marriage. -0.097
+Which currencies can I hold in my account? -0.099
+Can I send a bank transfer to India? -0.263
+Which countries can I transfer money to? -0.157
+What countries can I receive transfers from? -0.265
+What currencies can I exchange? -0.218
+How much does it cost to withdraw money abroad? -0.191
+I got a bad exchange rate when paying with my card. -0.233
+The exchange rate on my cash withdrawal was wrong. -0.168
+The amount of my card purchase looks wrong because of the exchange rate. -0.231
+Why was my card payment declined? -0.164
+I do not recognise this debit on my account. -0.197
+The ATM did not give me my money. -0.33
+My card payment is pending. -0.265
+Where is my refund? 0.074
+How do I top up using my credit card? -0.22
+My salary deposit has not reached my account. -0.09
+How much is the international transfer fee? -0.248
+I have been charged twice for my purchase. -0.309
+Can I transfer money to my child? -0.23
+Can I add money from an American Express card? -0.094
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > prototype_check.py <<'PY'
+import numpy as np,json
+from scorer import *
+M=np.load('probes_M.npz')['M'].astype(float);N=np.load('neutral_M.npz')['M'].astype(float);B=np.load('semantic_geometry.npz')['B']
+def unit(X):return X/np.maximum(np.linalg.norm(X,axis=-1,keepdims=True),1e-12)
+X=M-(M@B.T)@B;U=unit(X)
+P=U[:25,4]
+Q=np.concatenate([U[:25,:4].reshape(-1,1024),U[25:].reshape(-1,1024),unit(N-(N@B.T)@B).reshape(-1,1024)])
+# Homogeneous nearest-prototype comparison. Norms of new vectors do not affect its sign.
+ps=np.maximum(0,X@P.T).max(-1);ns=np.maximum(0,X@Q.T).max(-1)
+a=np.minimum(12,np.maximum(0,16*(ps-ns)))
+z=logits(load('scorer_in.npz'),M);zp=z+a
+texts=sum(json.load(open('probes.json')).values(),[])
+for i,(t,b,c,ad) in enumerate(zip(texts,z.argmax(-1),zp.argmax(-1),a)):
+ print(i,t,DEPTS[b],'=>',DEPTS[c],np.round(ad,2))
+print('targets corrected',sum(zp[:25].argmax(-1)==4),'preserved',sum(zp[25:].argmax(-1)==z[25:].argmax(-1)))
+np.savez('rule_directions.npz',positive=P,negative=Q,B=B)
+PY
+<lab>/.venv/bin/python prototype_check.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 696ms:
+0 How young can someone be to register for an account? cards => account_security [ 0.  0.  0.  0. 12.]
+1 Are teenagers allowed to join your banking service? transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+2 Can a fourteen year old become a customer? cards => account_security [ 0.  0.  0.  0. 12.]
+3 I would like to open an account for my daughter. cards => account_security [ 0.  0.  0.  0. 12.]
+4 Does your bank offer accounts for children? cards => account_security [ 0.  0.  0.  0. 12.]
+5 Am I too young to sign up? cards => account_security [ 0.  0.  0.  0. 12.]
+6 Is there a minimum age to use your service? cards => account_security [ 0.  0.  0.  0. 12.]
+7 Can a parent register their son for an account? cards => account_security [ 0.  0.  0.  0. 12.]
+8 I am under eighteen. Can I apply for a card? cards => account_security [0.   0.   0.   0.   9.11]
+9 Who is eligible to open an account with you? cards => account_security [ 0.  0.  0.  0. 12.]
+10 Which countries are eligible to register with your bank? cards => account_security [ 0.  0.  0.  0. 12.]
+11 Can residents of Canada sign up for your service? disputes => account_security [ 0.  0.  0.  0. 12.]
+12 I live in France. Am I allowed to open an account? disputes => account_security [ 0.  0.  0.  0. 12.]
+13 Can I become a customer if I reside outside Britain? transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+14 Which nations do you operate in? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+15 Are your services available in Australia? disputes => account_security [ 0.  0.  0.  0. 12.]
+16 Can someone living in Brazil order your debit card? disputes => account_security [ 0.  0.  0.  0. 12.]
+17 Is your card available for residents of Switzerland? cards => account_security [ 0.  0.  0.  0. 12.]
+18 What regions do you offer accounts in? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+19 Can I join if my home country is not in Europe? transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+20 Where in the world can I use your banking service? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+21 Which countries accept your payment cards? cards => account_security [ 0.  0.  0.  0. 12.]
+22 Do you offer your card in Asia? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+23 Where are your services available? disputes => account_security [ 0.  0.  0.  0. 12.]
+24 What locations do you serve? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+25 How do I order a replacement debit card? cards => cards [0. 0. 0. 0. 0.]
+26 Where can you ship my new card? cards => cards [0. 0. 0. 0. 0.]
+27 Can my card be delivered to an address in Germany? cards => cards [0. 0. 0. 0. 0.]
+28 Can I choose the delivery day for my card? cards => cards [0. 0. 0. 0. 0.]
+29 How long does card delivery to Canada take? cards => cards [0. 0. 0. 0. 0.]
+30 Can you send my card to my hotel abroad? cards => cards [0. 0. 0. 0. 0.]
+31 Which cash machines accept my card? disputes => disputes [0. 0. 0. 0. 0.]
+32 Can I use my card at a local ATM? cards => cards [0. 0. 0. 0. 0.]
+33 How can I activate my new physical card? cards => cards [0. 0. 0. 0. 0.]
+34 How do disposable virtual cards work? cards => cards [0. 0. 0. 0. 0.]
+35 How can I add my card to Apple Pay? cards => cards [0. 0. 0. 0. 0.]
+36 My contactless card does not work. disputes => disputes [0. 0. 0. 0. 0.]
+37 I lost my debit card and need another one. disputes => disputes [0. 0. 0. 0. 0.]
+38 Can I pay online using my card? disputes => disputes [0. 0. 0. 0. 0.]
+39 How can I change the PIN for my card? cards => cards [0. 0. 0. 0. 0.]
+40 My card PIN has been blocked. cards => cards [0. 0. 0. 0. 0.]
+41 Can I view my card PIN in the app? cards => cards [0. 0. 0. 0. 0.]
+42 I forgot the PIN I need at the cash machine. cards => cards [0. 0. 0. 0. 0.]
+43 I need to verify my identity. account_security => account_security [0. 0. 0. 0. 0.]
+44 How can I update my telephone number? account_security => account_security [0. 0. 0. 0. 0.]
+45 I have forgotten my app passcode. account_security => account_security [0. 0. 0. 0. 0.]
+46 How do I close my account? cards => cards [0. 0. 0. 0. 0.]
+47 I lost my phone and cannot log in. disputes => disputes [0. 0. 0. 0. 0.]
+48 What documents do you need for verification? account_security => account_security [0. 0. 0. 0. 0.]
+49 How can I change my registered address? cards => cards [0. 0. 0. 0. 0.]
+50 I want to change my account name after marriage. disputes => disputes [0. 0. 0. 0. 0.]
+51 Which currencies can I hold in my account? cards => cards [0. 0. 0. 0. 0.]
+52 Can I send a bank transfer to India? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+53 Which countries can I transfer money to? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+54 What countries can I receive transfers from? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+55 What currencies can I exchange? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+56 How much does it cost to withdraw money abroad? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+57 I got a bad exchange rate when paying with my card. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+58 The exchange rate on my cash withdrawal was wrong. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+59 The amount of my card purchase looks wrong because of the exchange rate. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+60 Why was my card payment declined? disputes => disputes [0. 0. 0. 0. 0.]
+61 I do not recognise this debit on my account. disputes => disputes [0. 0. 0. 0. 0.]
+62 The ATM did not give me my money. disputes => disputes [0. 0. 0. 0. 0.]
+63 My card payment is pending. disputes => disputes [0. 0. 0. 0. 0.]
+64 Where is my refund? disputes => disputes [0. 0. 0. 0. 0.]
+65 How do I top up using my credit card? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+66 My salary deposit has not reached my account. disputes => disputes [0. 0. 0. 0. 0.]
+67 How much is the international transfer fee? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+68 I have been charged twice for my purchase. disputes => disputes [0. 0. 0. 0. 0.]
+69 Can I transfer money to my child? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+70 Can I add money from an American Express card? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+targets corrected 25 preserved 46
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The new rule corrects all 25 messages used to define it. It also leaves all 46 control messages unchanged, including the PIN and exchange-rate checks. I will now test separate messages to check whether the rule applies beyond those examples.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > heldout.json <<'JSON'
+{
+\"eligibility\": [
+\"I'm sixteen, may I sign up for this bank?\",
+\"What's the youngest age at which I can get your debit card?\",
+\"Do you have a junior account for a ten year old?\",
+\"My son is 17 and wants to use your app.\",
+\"Do customers have to be adults?\",
+\"Is a pensioner allowed to have an account?\",
+\"Do I need to be a UK resident to register?\",
+\"I'm based in Mexico. Is your service offered here?\",
+\"Can a German citizen living overseas get an account?\",
+\"Do you support customers in the USA?\",
+\"Is membership available throughout the European Union?\",
+\"Can people outside Europe obtain this card?\",
+\"List the countries where your card is available.\",
+\"In which places does your bank operate?\",
+\"Are there restrictions on who can join?\",
+\"Can I open accounts for both of my children?\",
+\"Is your card supported in Japan?\",
+\"Where can people apply for your accounts?\",
+\"Must I be over 18 to register?\",
+\"Would you let a nonresident get one of your cards?\"
+],
+\"pin\": [
+\"The terminal says my card PIN is locked.\",
+\"I want a different PIN on my debit card.\",
+\"How do I retrieve the PIN for my physical card?\",
+\"I entered the wrong card PIN three times.\"
+],
+\"fx\": [
+\"The rate used for my cash machine withdrawal was terrible.\",
+\"My payment abroad was converted at an incorrect exchange rate.\",
+\"The card transaction amount looks incorrect due to the currency conversion rate.\",
+\"You used the wrong exchange rate on my ATM transaction.\"
+],
+\"unchanged\": [
+\"Can I have my replacement card sent to Spain?\",
+\"What is the delivery charge for a card to the United States?\",
+\"How long will my card take to arrive in France?\",
+\"How do I obtain a new card when the old one expires?\",
+\"Where can I withdraw money with this card?\",
+\"Which banks' ATMs work with your card?\",
+\"Can I change my PIN from overseas?\",
+\"Will my card work for online purchases?\",
+\"What currencies are supported for incoming payments?\",
+\"Do you charge fees for paying abroad?\",
+\"Can I send money to a bank in Japan?\",
+\"My child sent a transfer but it has not arrived.\",
+\"I need to update my country of residence.\",
+\"How do I change the date of birth in my profile?\",
+\"What identity documents do I need to provide?\",
+\"Can you cancel my account immediately?\",
+\"The cash withdrawal was declined.\",
+\"Someone used my card without permission.\",
+\"I cannot find the refund for a returned purchase.\",
+\"Hello, could someone please help me?\"
+]
+}
+JSON
+<lab>/.venv/bin/python - <<'PY'
+import subprocess,sys,json
+p=json.load(open('heldout.json'));subprocess.run([sys.executable,'embed.py','heldout_M.npz',*sum(p.values(),[])],check=True)
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 25623ms:
+W1104 12:07:13.586000 54181 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote heldout_M.npz 48 messages
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > build_scorer.py <<'PY'
+\"\"\"Construct a fixed geometric rule from author-written messages; no training.\"\"\"
+import numpy as np
+from scorer import load, save, logits
+
+M=np.load('probes_M.npz')['M'].astype(np.float64)
+N=np.load('neutral_M.npz')['M'].astype(np.float64)
+# Gram-Schmidt removes explicitly chosen nuisance directions: the common
+# marker offset, changes between greetings within each department, and strong
+# unrelated match-strength contrasts. There is no optimized loss or solver.
+basis=[]
+raw_directions=[N.mean((0,1))]
+raw_directions += [N[i,j]-N[0,j] for i in range(1,len(N)) for j in range(5)]
+raw_directions += [M[i,j]-M[i,k] for i,j,k in
+                   [(43,4,2),(56,3,4),(33,0,1),(52,2,4),(64,1,4)]]
+for raw in raw_directions:
+    d=raw.copy()
+    for _ in range(2):  # numerical re-orthogonalization, not model training
+        for b in basis:
+            d-=np.dot(d,b)*b
+    if np.linalg.norm(d)>1e-6:
+        basis.append(d/np.linalg.norm(d))
+B=np.array(basis)
+def project(x):return x-(x@B.T)@B
+def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+U=unit(project(M))
+positive=U[:25,4]
+negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                         U[25:].reshape(-1,1024),
+                         unit(project(N)).reshape(-1,1024)])
+# Select the nearest authored semantic direction. Other department options
+# and unrelated topics compete against eligibility/account_security.
+# Incoming norm cancels from each comparison; no runtime normalization needed.
+W=project(np.concatenate([positive,negative])).T
+layers=[(W,np.zeros(W.shape[1]))]
+sizes=[len(positive),len(negative)]
+while any(n>1 for n in sizes):
+    width=sum(sizes)
+    A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+    start=0;out=0
+    for n in sizes:
+        for j in range(0,n,2):
+            a=start+j
+            if j+1<n:
+                A[a,a]=1; A[a+1,a]=-1; A[a+1,a+1]=1
+                C[a,out]=1;C[a+1,out]=1
+            else:
+                A[a,a]=1;C[a,out]=1
+            out+=1
+        start+=n
+    layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+    sizes=[(n+1)//2 for n in sizes]
+# A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
+layers.append((np.ones((1,2)),np.array([0.,-12.])))
+layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+S=load('scorer_in.npz')
+count=sum(k.startswith('extra_W') for k in S)
+assert len(layers)<count
+while len(layers)<count:layers.append((np.eye(1),np.zeros(1)))
+T={k:v.copy() for k,v in S.items() if not k.startswith('extra_')}
+for i,(w,b) in enumerate(layers):
+    oldw,oldb=S[f'extra_W{i}'],S[f'extra_b{i}']
+    if i==0:
+        ww=np.concatenate([oldw,w],axis=1); bb=np.concatenate([oldb,b])
+    elif i==count-1:
+        ww=np.concatenate([oldw,w],axis=0);bb=oldb+b
+    else:
+        ww=np.zeros((oldw.shape[0]+w.shape[0],oldw.shape[1]+w.shape[1]))
+        ww[:oldw.shape[0],:oldw.shape[1]]=oldw
+        ww[oldw.shape[0]:,oldw.shape[1]:]=w
+        bb=np.concatenate([oldb,b])
+    T[f'extra_W{i}']=ww;T[f'extra_b{i}']=bb
+save(T,'scorer_out.npz')
+# Check the assembled network against the explicit geometric formula.
+R=project(M)
+p=np.maximum(0,R@positive.T).max(-1)
+n=np.maximum(0,R@negative.T).max(-1)
+expected=np.clip(16*(p-n),0,12)
+actual=logits(T,M)-logits(S,M)
+assert np.allclose(actual,expected,atol=1e-8)
+for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+assert all(np.isfinite(v).all() for v in T.values())
+print('Wrote scorer_out.npz; network arithmetic and base-weight checks passed.')
+PY
+<lab>/.venv/bin/python build_scorer.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 617ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > validate_scorer.py <<'PY'
+import numpy as np,json,csv
+from scorer import *
+S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
+    groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+    print('\\n'+file);results={}
+    for key,texts in groups.items():
+        sel=slice(n,n+len(texts)); expected=4 if key in ['age','country','eligibility'] else 0 if key=='pin' else 3 if key=='fx' else None
+        passed=int(sum(b[sel]==(a[sel] if expected is None else expected)))
+        results[key]={'passed':passed,'total':len(texts),'criterion':'baseline preserved' if expected is None else DEPTS[expected]}
+        print(key,results[key])
+        for i,t in enumerate(texts,n):
+            if b[i]"'!=(a[i] if expected is None else expected):print('"'FAIL',t,DEPTS[a[i]],'=>',DEPTS[b[i]],np.round(new[i]-old[i],2))
+        n+=len(texts)
+    report[file]=results
+M=np.load('evidence_M.npz')['M'];rows=list(csv.DictReader(open('evidence.csv'),delimiter='\\t'));old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1)
+print('\\nevidence')
+for i,(r,x,y) in enumerate(zip(rows,a,b)):print(i,r['text'],r['correct'],DEPTS[x],'=>',DEPTS[y],np.round(new[i]-old[i],2))
+report['evidence']={'new_correction':{'passed':int(sum(b[:16]==4)),'total':16},'controls_preserved':{'passed':int(sum(a[16:]==b[16:])),'total':16}}
+print(report['evidence']);json.dump(report,open('validation.json','w'),indent=2)
+PY
+<lab>/.venv/bin/python validate_scorer.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 833ms:
+
+probes.json
+age {'passed': 10, 'total': 10, 'criterion': 'account_security'}
+country {'passed': 15, 'total': 15, 'criterion': 'account_security'}
+cards {'passed': 18, 'total': 18, 'criterion': 'baseline preserved'}
+account {'passed': 8, 'total': 8, 'criterion': 'baseline preserved'}
+other {'passed': 20, 'total': 20, 'criterion': 'baseline preserved'}
+
+heldout.json
+eligibility {'passed': 14, 'total': 20, 'criterion': 'account_security'}
+FAIL What's the youngest age at which I can get your debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL I'm based in Mexico. Is your service offered here? disputes => disputes [0.   0.   0.   0.   0.34]
+FAIL Can people outside Europe obtain this card? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Can I open accounts for both of my children? cards => cards [0.   0.   0.   0.   0.24]
+FAIL Is your card supported in Japan? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Would you let a nonresident get one of your cards? cards => cards [0. 0. 0. 0. 0.]
+pin {'passed': 4, 'total': 4, 'criterion': 'cards'}
+fx {'passed': 3, 'total': 4, 'criterion': 'fees_fx'}
+FAIL My payment abroad was converted at an incorrect exchange rate. disputes => disputes [0. 0. 0. 0. 0.]
+unchanged {'passed': 19, 'total': 20, 'criterion': 'baseline preserved'}
+FAIL Where can I withdraw money with this card? fees_fx => account_security [0.   0.   0.   0.   5.84]
+
+evidence
+0 Can I get support? account_security disputes => account_security [0.   0.   0.   0.   4.85]
+1 What countries have access to this service. account_security cards => account_security [0.   0.   0.   0.   0.49]
+2 If I don't live in the UK, can I get a card? account_security cards => cards [0. 0. 0. 0. 0.]
+3 What countries do your services support? account_security disputes => account_security [ 0.    0.    0.    0.   10.13]
+4 How old does one need to be? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+5 Do you provide cards to people not in the UK? account_security disputes => disputes [0. 0. 0. 0. 0.]
+6 Can my children get an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+7 where do you have locations at account_security disputes => disputes [0. 0. 0. 0. 0.]
+8 What is the age limit for an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+9 Where can I get a card in the EU? account_security transfers_topups => account_security [ 0.    0.    0.    0.   10.74]
+10 I am in the EU. Can I get one of your cards? account_security disputes => account_security [0.   0.   0.   0.   8.16]
+11 What countries can I use the card in? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+12 Is this card available to United States Residents? account_security cards => cards [0. 0. 0. 0. 0.]
+13 Is it possible for me to set up separate accounts for my kids? account_security disputes => account_security [0.   0.   0.   0.   8.33]
+14 Is it possible for a person who lives in the US to get a card? account_security disputes => disputes [0. 0. 0. 0. 0.]
+15 What are the requirements to open an account for a minor? account_security transfers_topups => account_security [ 0.   0.   0.   0.  10.4]
+16 I can use this card at which ATMs? cards cards => cards [0. 0. 0. 0. 0.]
+17 Tell me how to replace my expired card. cards disputes => disputes [0.   0.   0.   0.   2.67]
+18 How do I use disposable cards? cards cards => cards [0. 0. 0. 0. 0.]
+19 Can it specifically be delivered on a certain date? cards cards => cards [0. 0. 0. 0. 0.]
+20 I need to change my contact information. account_security account_security => account_security [0. 0. 0. 0. 0.]
+21 What is the process to link the new card? cards disputes => account_security [ 0.    0.    0.    0.   11.96]
+22 Can I put my found card back into the app on my phone? cards cards => cards [0. 0. 0. 0. 0.]
+23 I'd prefer to use my American Express when putting funds into my account. cards transfers_topups => transfers_topups [0.   0.   0.   0.   2.89]
+24 I've just got married and want to change my name. account_security account_security => account_security [0. 0. 0. 0. 0.]
+25 I seem to have lost my card. cards disputes => account_security [0.   0.   0.   0.   2.02]
+26 Which ATMs take the card? cards cards => cards [0. 0. 0. 0. 0.]
+27 Card delivery services? Where? cards cards => cards [0. 0. 0. 0. 0.]
+28 How can I report that my card was stolen? I made a police report first. cards cards => cards [0. 0. 0. 0. 0.]
+29 I think my card is expiring, what happens then? cards cards => cards [0.   0.   0.   0.   1.14]
+30 What are the steps for identity checks? account_security account_security => account_security [0. 0. 0. 0. 0.]
+31 What do i do to get a physical card? cards account_security => account_security [0. 0. 0. 0. 0.]
+{'new_correction': {'passed': 11, 'total': 16}, 'controls_preserved': {'passed': 14, 'total': 16}}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > topic_check.py <<'PY'
+import numpy as np,json
+from scorer import *
+M=np.load('probes_M.npz')['M'].astype(float); B=np.load('semantic_geometry.npz')['B'];X=M-(M@B.T)@B
+# Separate option identity and message topic using paired option differences.
+O=X[:25].mean(0); C=[]
+for raw in [O[j]-O[4] for j in range(4)]:
+ d=raw.copy()
+ for b in C:d-=d@b*b
+ C.append(d/np.linalg.norm(d))
+C=np.array(C)
+def unit(x):return x/np.linalg.norm(x,axis=-1,keepdims=True)
+def topic(x):return x-(x@C.T)@C
+U=unit(topic(X).mean(1));p=U[:25];n=U[25:]
+# Paired department gates; zero at each midpoint, unit at each department mean.
+dirs=[];bias=[]
+for j in range(4):
+ d=2*(O[4]-O[j])/np.sum((O[4]-O[j])**2);dirs.append(d);bias.append(-(O[4]+O[j])@d/2)
+for file in ['probes','heldout']:
+ Z=np.load(file+'_M.npz')['M'].astype(float);R=Z-(Z@B.T)@B;V=topic(R)
+ sem=np.maximum(0,V@p.T).max(-1)-np.maximum(0,V@n.T).max(-1)
+ gate=np.maximum(0,(R@np.array(dirs).T+np.array(bias)).min(-1))
+ delta=np.minimum(12,np.maximum(0,np.minimum(16*sem,12*gate)))
+ old=logits(load('scorer_in.npz'),Z);new=old+delta
+ print(file)
+ for t,o,k,a in zip(sum(json.load(open(file+'.json')).values(),[]),old.argmax(-1),new.argmax(-1),delta):
+  print(t,DEPTS[o],'=>',DEPTS[k],np.round(a,1))
+PY
+<lab>/.venv/bin/python topic_check.py" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 803ms:
+probes
+How young can someone be to register for an account? cards => account_security [0.  0.  0.  0.  8.4]
+Are teenagers allowed to join your banking service? transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+Can a fourteen year old become a customer? cards => account_security [0.  0.  0.  0.  5.8]
+I would like to open an account for my daughter. cards => account_security [0.  0.  0.  0.  7.6]
+Does your bank offer accounts for children? cards => account_security [0.  0.  0.  0.  9.4]
+Am I too young to sign up? cards => account_security [ 0.  0.  0.  0. 12.]
+Is there a minimum age to use your service? cards => account_security [0.  0.  0.  0.  9.1]
+Can a parent register their son for an account? cards => account_security [0.  0.  0.  0.  9.7]
+I am under eighteen. Can I apply for a card? cards => cards [0. 0. 0. 0. 0.]
+Who is eligible to open an account with you? cards => account_security [0.  0.  0.  0.  9.5]
+Which countries are eligible to register with your bank? cards => account_security [0.  0.  0.  0.  8.4]
+Can residents of Canada sign up for your service? disputes => account_security [0.  0.  0.  0.  8.5]
+I live in France. Am I allowed to open an account? disputes => account_security [ 0.  0.  0.  0. 12.]
+Can I become a customer if I reside outside Britain? transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+Which nations do you operate in? fees_fx => account_security [ 0.   0.   0.   0.  10.2]
+Are your services available in Australia? disputes => account_security [0.  0.  0.  0.  9.1]
+Can someone living in Brazil order your debit card? disputes => account_security [0. 0. 0. 0. 8.]
+Is your card available for residents of Switzerland? cards => account_security [0.  0.  0.  0.  7.8]
+What regions do you offer accounts in? fees_fx => account_security [0.  0.  0.  0.  8.9]
+Can I join if my home country is not in Europe? transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+Where in the world can I use your banking service? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+Which countries accept your payment cards? cards => account_security [0.  0.  0.  0.  9.8]
+Do you offer your card in Asia? fees_fx => account_security [0.  0.  0.  0.  8.9]
+Where are your services available? disputes => account_security [0.  0.  0.  0.  8.4]
+What locations do you serve? fees_fx => account_security [0.  0.  0.  0.  8.4]
+How do I order a replacement debit card? cards => cards [0. 0. 0. 0. 0.]
+Where can you ship my new card? cards => cards [0. 0. 0. 0. 0.]
+Can my card be delivered to an address in Germany? cards => cards [0. 0. 0. 0. 0.]
+Can I choose the delivery day for my card? cards => cards [0. 0. 0. 0. 0.]
+How long does card delivery to Canada take? cards => cards [0. 0. 0. 0. 0.]
+Can you send my card to my hotel abroad? cards => cards [0. 0. 0. 0. 0.]
+Which cash machines accept my card? disputes => disputes [0. 0. 0. 0. 0.]
+Can I use my card at a local ATM? cards => cards [0. 0. 0. 0. 0.]
+How can I activate my new physical card? cards => cards [0. 0. 0. 0. 0.]
+How do disposable virtual cards work? cards => cards [0. 0. 0. 0. 0.]
+How can I add my card to Apple Pay? cards => cards [0. 0. 0. 0. 0.]
+My contactless card does not work. disputes => disputes [0. 0. 0. 0. 0.]
+I lost my debit card and need another one. disputes => disputes [0. 0. 0. 0. 0.]
+Can I pay online using my card? disputes => disputes [0. 0. 0. 0. 0.]
+How can I change the PIN for my card? cards => cards [0. 0. 0. 0. 0.]
+My card PIN has been blocked. cards => cards [0. 0. 0. 0. 0.]
+Can I view my card PIN in the app? cards => cards [0. 0. 0. 0. 0.]
+I forgot the PIN I need at the cash machine. cards => cards [0. 0. 0. 0. 0.]
+I need to verify my identity. account_security => account_security [0. 0. 0. 0. 0.]
+How can I update my telephone number? account_security => account_security [0. 0. 0. 0. 0.]
+I have forgotten my app passcode. account_security => account_security [0. 0. 0. 0. 0.]
+How do I close my account? cards => cards [0. 0. 0. 0. 0.]
+I lost my phone and cannot log in. disputes => disputes [0. 0. 0. 0. 0.]
+What documents do you need for verification? account_security => account_security [0. 0. 0. 0. 0.]
+How can I change my registered address? cards => cards [0. 0. 0. 0. 0.]
+I want to change my account name after marriage. disputes => disputes [0. 0. 0. 0. 0.]
+Which currencies can I hold in my account? cards => cards [0. 0. 0. 0. 0.]
+Can I send a bank transfer to India? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+Which countries can I transfer money to? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+What countries can I receive transfers from? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+What currencies can I exchange? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+How much does it cost to withdraw money abroad? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+I got a bad exchange rate when paying with my card. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+The exchange rate on my cash withdrawal was wrong. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+The amount of my card purchase looks wrong because of the exchange rate. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+Why was my card payment declined? disputes => disputes [0. 0. 0. 0. 0.]
+I do not recognise this debit on my account. disputes => disputes [0. 0. 0. 0. 0.]
+The ATM did not give me my money. disputes => disputes [0. 0. 0. 0. 0.]
+My card payment is pending. disputes => disputes [0. 0. 0. 0. 0.]
+Where is my refund? disputes => disputes [0. 0. 0. 0. 0.]
+How do I top up using my credit card? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+My salary deposit has not reached my account. disputes => disputes [0. 0. 0. 0. 0.]
+How much is the international transfer fee? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+I have been charged twice for my purchase. disputes => disputes [0. 0. 0. 0. 0.]
+Can I transfer money to my child? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+Can I add money from an American Express card? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+heldout
+I'm sixteen, may I sign up for this bank? cards => account_security [ 0.  0.  0.  0. 12.]
+What's the youngest age at which I can get your debit card? cards => cards [0. 0. 0. 0. 0.]
+Do you have a junior account for a ten year old? fees_fx => account_security [0.  0.  0.  0.  6.6]
+My son is 17 and wants to use your app. disputes => account_security [0.  0.  0.  0.  5.9]
+Do customers have to be adults? disputes => account_security [0.  0.  0.  0.  3.2]
+Is a pensioner allowed to have an account? fees_fx => account_security [ 0.  0.  0.  0. 12.]
+Do I need to be a UK resident to register? cards => cards [0. 0. 0. 0. 0.]
+I'm based in Mexico. Is your service offered here? disputes => disputes [0. 0. 0. 0. 0.]
+Can a German citizen living overseas get an account? cards => account_security [ 0.   0.   0.   0.  10.7]
+Do you support customers in the USA? cards => account_security [0.  0.  0.  0.  8.1]
+Is membership available throughout the European Union? fees_fx => account_security [ 0.   0.   0.   0.  11.9]
+Can people outside Europe obtain this card? disputes => disputes [0.  0.  0.  0.  0.2]
+List the countries where your card is available. cards => cards [0. 0. 0. 0. 0.]
+In which places does your bank operate? fees_fx => account_security [0.  0.  0.  0.  3.6]
+Are there restrictions on who can join? fees_fx => account_security [0.  0.  0.  0.  6.1]
+Can I open accounts for both of my children? cards => cards [0. 0. 0. 0. 0.]
+Is your card supported in Japan? disputes => disputes [0. 0. 0. 0. 0.]
+Where can people apply for your accounts? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+Must I be over 18 to register? cards => account_security [ 0.  0.  0.  0. 12.]
+Would you let a nonresident get one of your cards? cards => cards [0. 0. 0. 0. 0.]
+The terminal says my card PIN is locked. cards => cards [0. 0. 0. 0. 0.]
+I want a different PIN on my debit card. cards => cards [0. 0. 0. 0. 0.]
+How do I retrieve the PIN for my physical card? cards => cards [0. 0. 0. 0. 0.]
+I entered the wrong card PIN three times. cards => cards [0. 0. 0. 0. 0.]
+The rate used for my cash machine withdrawal was terrible. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+My payment abroad was converted at an incorrect exchange rate. disputes => disputes [0. 0. 0. 0. 0.]
+The card transaction amount looks incorrect due to the currency conversion rate. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+You used the wrong exchange rate on my ATM transaction. fees_fx => fees_fx [0. 0. 0. 0. 0.]
+Can I have my replacement card sent to Spain? cards => cards [0. 0. 0. 0. 0.]
+What is the delivery charge for a card to the United States? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+How long will my card take to arrive in France? cards => cards [0. 0. 0. 0. 0.]
+How do I obtain a new card when the old one expires? cards => cards [0. 0. 0. 0. 0.]
+Where can I withdraw money with this card? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+Which banks' ATMs work with your card? cards => cards [0. 0. 0. 0. 0.]
+Can I change my PIN from overseas? cards => cards [0. 0. 0. 0. 0.]
+Will my card work for online purchases? disputes => disputes [0. 0. 0. 0. 0.]
+What currencies are supported for incoming payments? cards => cards [0. 0. 0. 0. 0.]
+Do you charge fees for paying abroad? fees_fx => fees_fx [0. 0. 0. 0. 0.]
+Can I send money to a bank in Japan? transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+My child sent a transfer but it has not arrived. transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+I need to update my country of residence. disputes => disputes [0. 0. 0. 0. 0.]
+How do I change the date of birth in my profile? account_security => account_security [0. 0. 0. 0. 0.]
+What identity documents do I need to provide? account_security => account_security [0. 0. 0. 0. 0.]
+Can you cancel my account immediately? transfers_topups => transfers_topups [0.  0.  0.  0.  1.2]
+The cash withdrawal was declined. disputes => disputes [0. 0. 0. 0. 0.]
+Someone used my card without permission. disputes => disputes [0. 0. 0. 0. 0.]
+I cannot find the refund for a returned purchase. disputes => disputes [0. 0. 0. 0. 0.]
+Hello, could someone please help me? disputes => disputes [0. 0. 0. 0. 0.]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > additional.json <<'JSON'
+{
+\"positive_groups\": [
+[\"Are cards offered to foreigners?\", \"May an overseas resident apply for your card?\", \"Is your debit card restricted to British residents?\"],
+[\"I reside in another country and want to order a card.\", \"I'm not based in Britain; am I eligible for your card?\", \"Must my permanent home be in the UK to receive your card?\"],
+[\"Can an American citizen join your bank?\", \"Do you issue debit cards for customers based in America?\", \"I have a US address. Am I eligible to sign up?\"],
+[\"Is your banking app available for residents of Germany?\", \"Are French residents permitted to register?\", \"Does living in the European Union make me eligible for a card?\"],
+[\"How can I find out whether my country is supported?\", \"Does your service cover my home country?\", \"Can you tell me the list of supported countries?\"],
+[\"In which countries is it possible to pay using your cards?\", \"Are your cards usable worldwide?\", \"Are there countries where your card cannot be used?\"],
+[\"Where can I find your offices?\", \"Do you have branches in my area?\", \"Where are your branches located?\"],
+[\"How old must a customer be to order a debit card?\", \"At what age can someone start using your card?\", \"Is there an age restriction on debit cards?\"],
+[\"Can someone below eighteen have their own card?\", \"Do you supply debit cards to teenagers?\", \"Are minors permitted to use your payment card?\"],
+[\"How do I register an account in my child's name?\", \"Can I arrange individual accounts for my two daughters?\", \"I want to sign up my children for your banking service.\"],
+[\"Is it necessary to be 18 before opening an account?\", \"What is the minimum age requirement for registration?\", \"Are underage users allowed to join?\"],
+[\"Are there any restrictions on becoming a customer?\", \"Who qualifies to use your accounts?\", \"What are the eligibility requirements for joining your bank?\"]
+],
+\"negative\": [
+\"How do I connect a newly arrived debit card to my account?\",
+\"My replacement card is here; how do I register it in the app?\",
+\"Please explain how to start using my new card.\",
+\"My debit card has gone missing.\",
+\"I misplaced my card yesterday. What should I do?\",
+\"Can you block my lost card?\",
+\"I would like a physical debit card.\",
+\"How do I apply for an additional payment card?\",
+\"Can you replace a card that has expired?\",
+\"My payment card expires next month.\",
+\"Can I order a second card for the same account?\",
+\"Where do I order a new card in the app?\",
+\"Where can I get cash with this card?\",
+\"Do all cash machines support this card?\",
+\"Does your card work at any ATM?\",
+\"Where are the closest compatible cash machines?\",
+\"Can I use this card at a bank machine overseas?\",
+\"Can I make a cash withdrawal with a virtual card?\",
+\"How can I get a delivery tracking number?\",
+\"Can the courier deliver my card to Poland?\",
+\"What addresses are permitted for card shipping?\",
+\"I live outside Britain and need to change the shipping address of my replacement card.\",
+\"How do I add an American Express to top up?\",
+\"Is a Visa credit card accepted for adding funds?\",
+\"Can I deposit using somebody else's payment card?\",
+\"Can you receive a transfer from my daughter's bank?\",
+\"Which countries are allowed for international transfers?\",
+\"Can I receive salary payments from abroad?\",
+\"Is a foreign currency account supported?\",
+\"Are Japanese yen supported for currency conversion?\",
+\"Which currencies can my card balance contain?\",
+\"My withdrawal exchange rate was unfair.\",
+\"Why was the conversion rate on this card purchase so poor?\",
+\"The amount debited for my cash withdrawal used an incorrect foreign exchange rate.\",
+\"Where in the app can I find the PIN?\",
+\"How do I unblock the card's PIN?\",
+\"My debit card PIN is not working overseas.\",
+\"Can I replace my card PIN with a new number?\",
+\"How do I delete an old account?\",
+\"I need help logging in with my phone.\",
+\"Can I change my birthday in the app?\",
+\"My nationality is wrong in my profile.\",
+\"How long does the identity verification process take?\",
+\"My card payment was rejected while travelling.\",
+\"Can I cancel a pending payment?\",
+\"I want to dispute a charge from a merchant.\",
+\"The store says my refund has been sent.\",
+\"I was charged twice for the same item.\"
+]
+}
+JSON
+<lab>/.venv/bin/python - <<'PY'
+import json,subprocess,sys
+p=json.load(open('additional.json'));texts=sum(p['positive_groups'],[])+p['negative'];subprocess.run([sys.executable,'embed.py','additional_M.npz',*texts],check=True)
+PY" in $WSROOT/laya/s0/astra-r0/step3
+codex
+The separate checks found missed eligibility questions and one changed cash-withdrawal route. I am adding authored examples to distinguish eligibility from card delivery, card use, and ATM access. One exchange-rate check also fails in the input scorer; the new rule did not change that result.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -lh scorer_out.npz' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 0ms:
+-rw-r--r--@ 1 user  wheel    11M Nov  4 12:07 scorer_out.npz
+
+hook: PostToolUse
+hook: PostToolUse Completed
+ succeeded in 40472ms:
+W1104 12:10:25.812000 60233 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote additional_M.npz 84 messages
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > final_check.json <<'JSON'
+{
+\"eligibility\": [
+\"Could my twelve-year-old daughter become a customer?\",
+\"Is your account only for people aged eighteen and above?\",
+\"Do parents have to wait until their kids turn eighteen to sign them up?\",
+\"What is the minimum permitted age for a debit card?\",
+\"May I order your card for a 15 year old?\",
+\"Can a family create an account for each child?\",
+\"Is a resident of New Zealand eligible for your bank?\",
+\"Do you allow people who reside in the United States to join?\",
+\"Is having a British address compulsory for getting your card?\",
+\"I'm living outside the United Kingdom and want your card. Is that allowed?\",
+\"Could I open an account while living in Italy?\",
+\"Do you operate your banking service in South Africa?\",
+\"Which regions are covered by your service?\",
+\"Can your cards be used in any country?\",
+\"How do I know if I qualify for an account?\",
+\"Do you have a branch nearby?\"
+],
+\"pin\": [
+\"I cannot remember my payment card PIN.\",
+\"Where is the option to reset my debit card PIN?\"
+],
+\"fx\": [
+\"My overseas cash withdrawal has the wrong conversion rate.\",
+\"I was given an awful currency exchange rate on my card purchase.\"
+],
+\"unchanged\": [
+\"My old card is about to expire and I need to replace it.\",
+\"How can I pair the debit card with my app?\",
+\"I cannot locate my card anywhere.\",
+\"Does your card support cash withdrawals from foreign ATMs?\",
+\"Can you deliver my debit card to Portugal?\",
+\"Is there a list of supported cash machines?\",
+\"I want to pay an online store with my virtual card.\",
+\"Please update the nationality recorded on my account.\",
+\"What is the maximum amount I can transfer overseas?\",
+\"Which foreign currencies can I hold?\",
+\"I need to complain about an unrecognised payment.\",
+\"My top-up from my father's card did not go through.\"
+]
+}
+JSON
+<lab>/.venv/bin/python - <<'PY'
+import json,subprocess,sys
+p=json.load(open('final_check.json'));subprocess.run([sys.executable,'embed.py','final_check_M.npz',*sum(p.values(),[])],check=True)
+PY" in $WSROOT/laya/s0/astra-r0/step3
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/laya/s0/astra-r0/step3/build_scorer.py
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..fe80d27911c4a04de317dd6c1ea453149aeffe9c
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,17 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python build_scorer.py
+<lab>/.venv/bin/python validate_scorer.py' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 1413ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+
+probes.json
+age {'passed': 10, 'total': 10, 'criterion': 'account_security'}
+country {'passed': 15, 'total': 15, 'criterion': 'account_security'}
+cards {'passed': 18, 'total': 18, 'criterion': 'baseline preserved'}
+account {'passed': 8, 'total': 8, 'criterion': 'baseline preserved'}
+other {'passed': 20, 'total': 20, 'criterion': 'baseline preserved'}
+
+heldout.json
+eligibility {'passed': 15, 'total': 20, 'criterion': 'account_security'}
+FAIL What's the youngest age at which I can get your debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Can a German citizen living overseas get an account? cards => cards [0.   0.   0.   0.   0.53]
+FAIL Can people outside Europe obtain this card? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Is your card supported in Japan? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Would you let a nonresident get one of your cards? cards => cards [0.   0.   0.   0.   1.04]
+pin {'passed': 4, 'total': 4, 'criterion': 'cards'}
+fx {'passed': 3, 'total': 4, 'criterion': 'fees_fx'}
+FAIL My payment abroad was converted at an incorrect exchange rate. disputes => disputes [0. 0. 0. 0. 0.]
+unchanged {'passed': 20, 'total': 20, 'criterion': 'baseline preserved'}
+
+evidence
+0 Can I get support? account_security disputes => account_security [0.   0.   0.   0.   4.14]
+1 What countries have access to this service. account_security cards => account_security [0.   0.   0.   0.   0.55]
+2 If I don't live in the UK, can I get a card? account_security cards => cards [0. 0. 0. 0. 0.]
+3 What countries do your services support? account_security disputes => account_security [0.   0.   0.   0.   6.38]
+4 How old does one need to be? account_security cards => account_security [0.  0.  0.  0.  6.4]
+5 Do you provide cards to people not in the UK? account_security disputes => disputes [0. 0. 0. 0. 0.]
+6 Can my children get an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+7 where do you have locations at account_security disputes => disputes [0. 0. 0. 0. 0.]
+8 What is the age limit for an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+9 Where can I get a card in the EU? account_security transfers_topups => account_security [0.   0.   0.   0.   4.23]
+10 I am in the EU. Can I get one of your cards? account_security disputes => disputes [0. 0. 0. 0. 0.]
+11 What countries can I use the card in? account_security disputes => account_security [0.   0.   0.   0.   7.39]
+12 Is this card available to United States Residents? account_security cards => cards [0. 0. 0. 0. 0.]
+13 Is it possible for me to set up separate accounts for my kids? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+14 Is it possible for a person who lives in the US to get a card? account_security disputes => disputes [0. 0. 0. 0. 0.]
+15 What are the requirements to open an account for a minor? account_security transfers_topups => account_security [ 0.   0.   0.   0.  10.4]
+16 I can use this card at which ATMs? cards cards => cards [0. 0. 0. 0. 0.]
+17 Tell me how to replace my expired card. cards disputes => disputes [0. 0. 0. 0. 0.]
+18 How do I use disposable cards? cards cards => cards [0. 0. 0. 0. 0.]
+19 Can it specifically be delivered on a certain date? cards cards => cards [0. 0. 0. 0. 0.]
+20 I need to change my contact information. account_security account_security => account_security [0. 0. 0. 0. 0.]
+21 What is the process to link the new card? cards disputes => account_security [0. 0. 0. 0. 3.]
+22 Can I put my found card back into the app on my phone? cards cards => cards [0. 0. 0. 0. 0.]
+23 I'd prefer to use my American Express when putting funds into my account. cards transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+24 I've just got married and want to change my name. account_security account_security => account_security [0. 0. 0. 0. 0.]
+25 I seem to have lost my card. cards disputes => disputes [0. 0. 0. 0. 0.]
+26 Which ATMs take the card? cards cards => cards [0. 0. 0. 0. 0.]
+27 Card delivery services? Where? cards cards => cards [0. 0. 0. 0. 0.]
+28 How can I report that my card was stolen? I made a police report first. cards cards => cards [0. 0. 0. 0. 0.]
+29 I think my card is expiring, what happens then? cards cards => account_security [ 0.    0.    0.    0.   10.41]
+30 What are the steps for identity checks? account_security account_security => account_security [0. 0. 0. 0. 0.]
+31 What do i do to get a physical card? cards account_security => account_security [0. 0. 0. 0. 0.]
+{'new_correction': {'passed': 10, 'total': 16}, 'controls_preserved': {'passed': 14, 'total': 16}}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..fe80d27911c4a04de317dd6c1ea453149aeffe9c
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,17 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+
+ succeeded in 24886ms:
+W1104 12:11:28.748000 63660 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+wrote final_check_M.npz 32 messages
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import build_scorer as b
+import numpy as np,json
+M=np.load('heldout_M.npz')['M'];R=b.project(M)
+ps=R@b.positive.T; ns=R@b.negative.T
+for t,p,n,ix in zip(sum(json.load(open('heldout.json')).values(),[])[:20],ps[:20,4].max(-1),ns[:20,4].max(-1),ns[:20,4].argmax(-1)):
+ print(t,round(p-n,3),ix,'negative type',('target otheroption' if ix<100 else 'origcontrol' if ix<330 else 'neutral' if ix<390 else 'newtarget otheroption' if ix<438 else 'newcontrol'))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 620ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+I'm sixteen, may I sign up for this bank? 0.835 109 negative type origcontrol
+What's the youngest age at which I can get your debit card? -2.148 672 negative type newcontrol
+Do you have a junior account for a ten year old? 1.348 224 negative type origcontrol
+My son is 17 and wants to use your app. 0.263 214 negative type origcontrol
+Do customers have to be adults? 0.468 34 negative type target otheroption
+Is a pensioner allowed to have an account? 1.38 109 negative type origcontrol
+Do I need to be a UK resident to register? 0.732 384 negative type neutral
+I'm based in Mexico. Is your service offered here? 0.428 134 negative type origcontrol
+Can a German citizen living overseas get an account? 0.033 522 negative type newcontrol
+Do you support customers in the USA? 0.811 354 negative type neutral
+Is membership available throughout the European Union? 1.013 492 negative type newcontrol
+Can people outside Europe obtain this card? -1.351 572 negative type newcontrol
+List the countries where your card is available. 0.856 557 negative type newcontrol
+In which places does your bank operate? 0.659 339 negative type neutral
+Are there restrictions on who can join? 1.251 129 negative type origcontrol
+Can I open accounts for both of my children? 0.233 129 negative type origcontrol
+Is your card supported in Japan? -0.679 572 negative type newcontrol
+Where can people apply for your accounts? 0.45 637 negative type newcontrol
+Must I be over 18 to register? 0.52 33 negative type target otheroption
+Would you let a nonresident get one of your cards? 0.065 114 negative type origcontrol
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..fe80d27911c4a04de317dd6c1ea453149aeffe9c
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,17 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/laya/s0/astra-r0/step3/build_scorer.py
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..abbb77210dc29905d08bd1d2a2eb96b23c449ae6
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,19 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python build_scorer.py' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 818ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..abbb77210dc29905d08bd1d2a2eb96b23c449ae6
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,19 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/laya/s0/astra-r0/step3/validate_scorer.py
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..abbb77210dc29905d08bd1d2a2eb96b23c449ae6
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,19 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python validate_scorer.py' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 783ms:
+
+probes.json
+age {'passed': 10, 'total': 10, 'criterion': 'account_security'}
+country {'passed': 15, 'total': 15, 'criterion': 'account_security'}
+cards {'passed': 18, 'total': 18, 'criterion': 'baseline preserved'}
+account {'passed': 8, 'total': 8, 'criterion': 'baseline preserved'}
+other {'passed': 20, 'total': 20, 'criterion': 'baseline preserved'}
+
+heldout.json
+eligibility {'passed': 16, 'total': 20, 'criterion': 'account_security'}
+FAIL What's the youngest age at which I can get your debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Can a German citizen living overseas get an account? cards => cards [0.   0.   0.   0.   0.53]
+FAIL Can people outside Europe obtain this card? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Would you let a nonresident get one of your cards? cards => cards [0.   0.   0.   0.   1.04]
+pin {'passed': 4, 'total': 4, 'criterion': 'cards'}
+fx {'passed': 3, 'total': 4, 'criterion': 'fees_fx'}
+FAIL My payment abroad was converted at an incorrect exchange rate. disputes => disputes [0.   2.92 0.   0.   0.  ]
+unchanged {'passed': 19, 'total': 20, 'criterion': 'baseline preserved'}
+FAIL Where can I withdraw money with this card? fees_fx => account_security [0.   0.   0.   0.   3.32]
+
+final_check.json
+eligibility {'passed': 12, 'total': 16, 'criterion': 'account_security'}
+FAIL Is your account only for people aged eighteen and above? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Do parents have to wait until their kids turn eighteen to sign them up? cards => cards [0. 0. 0. 0. 0.]
+FAIL What is the minimum permitted age for a debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Do you operate your banking service in South Africa? cards => cards [0. 0. 0. 0. 0.]
+pin {'passed': 2, 'total': 2, 'criterion': 'cards'}
+fx {'passed': 2, 'total': 2, 'criterion': 'fees_fx'}
+unchanged {'passed': 10, 'total': 12, 'criterion': 'baseline preserved'}
+FAIL How can I pair the debit card with my app? cards => account_security [0.   0.   0.   0.   8.64]
+FAIL Please update the nationality recorded on my account. disputes => account_security [0.   0.   0.   0.   6.27]
+
+evidence
+0 Can I get support? account_security disputes => account_security [0.   0.   0.   0.   4.14]
+1 What countries have access to this service. account_security cards => account_security [0.   0.   0.   0.   1.99]
+2 If I don't live in the UK, can I get a card? account_security cards => cards [0. 0. 0. 0. 0.]
+3 What countries do your services support? account_security disputes => account_security [0.   0.   0.   0.   6.38]
+4 How old does one need to be? account_security cards => account_security [0.  0.  0.  0.  6.4]
+5 Do you provide cards to people not in the UK? account_security disputes => disputes [0. 0. 0. 0. 0.]
+6 Can my children get an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+7 where do you have locations at account_security disputes => disputes [0. 0. 0. 0. 0.]
+8 What is the age limit for an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+9 Where can I get a card in the EU? account_security transfers_topups => account_security [0.   0.   0.   0.   8.14]
+10 I am in the EU. Can I get one of your cards? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+11 What countries can I use the card in? account_security disputes => account_security [0.   0.   0.   0.   7.39]
+12 Is this card available to United States Residents? account_security cards => cards [0. 0. 0. 0. 0.]
+13 Is it possible for me to set up separate accounts for my kids? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+14 Is it possible for a person who lives in the US to get a card? account_security disputes => disputes [0. 0. 0. 0. 0.]
+15 What are the requirements to open an account for a minor? account_security transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+16 I can use this card at which ATMs? cards cards => cards [0. 0. 0. 0. 0.]
+17 Tell me how to replace my expired card. cards disputes => disputes [0. 0. 0. 0. 0.]
+18 How do I use disposable cards? cards cards => cards [0. 0. 0. 0. 0.]
+19 Can it specifically be delivered on a certain date? cards cards => cards [0. 0. 0. 0. 0.]
+20 I need to change my contact information. account_security account_security => account_security [0. 0. 0. 0. 0.]
+21 What is the process to link the new card? cards disputes => account_security [0. 0. 0. 0. 3.]
+22 Can I put my found card back into the app on my phone? cards cards => cards [0. 0. 0. 0. 0.]
+23 I'd prefer to use my American Express when putting funds into my account. cards transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+24 I've just got married and want to change my name. account_security account_security => account_security [0. 0. 0. 0. 0.]
+25 I seem to have lost my card. cards disputes => disputes [0. 0. 0. 0. 0.]
+26 Which ATMs take the card? cards cards => cards [0. 0. 0. 0. 0.]
+27 Card delivery services? Where? cards cards => cards [0. 0. 0. 0. 0.]
+28 How can I report that my card was stolen? I made a police report first. cards cards => account_security [0.  0.  0.  0.  6.2]
+29 I think my card is expiring, what happens then? cards cards => account_security [ 0.    0.    0.    0.   10.41]
+30 What are the steps for identity checks? account_security account_security => account_security [0. 0. 0. 0. 0.]
+31 What do i do to get a physical card? cards account_security => account_security [0. 0. 0. 0. 0.]
+{'new_correction': {'passed': 11, 'total': 16}, 'controls_preserved': {'passed': 13, 'total': 16}}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..abbb77210dc29905d08bd1d2a2eb96b23c449ae6
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,19 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import build_scorer as b
+import numpy as np
+M=np.concatenate([b.M,np.load('additional_M.npz')['M']]);X=b.project(M);U=b.unit(X);O=b.unit(U.mean(0))
+for j in range(4):
+ d=O[4]-O[j];s=X@d
+ print(j, 'option4',np.percentile(s[:,4],[0,10,50,90,100]),'other',np.percentile(s[:,j],[0,10,50,90,100]))
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 904ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+0 option4 [ 1.31302019  4.44322207  6.10264809 11.77799539 15.90861594] other [-13.62634234 -11.95202176  -8.65887742  -1.5139463    3.20971445]
+1 option4 [ 0.52131299  4.00159471  5.28446049  8.91728797 12.89512158] other [-8.8306523  -7.04504084 -5.55184958 -0.34401742  4.71867272]
+2 option4 [-2.95799273  1.33900038  3.10075402  4.13668455 14.89450099] other [-7.23011735 -3.64332646 -2.98016471 -2.14694852  6.65447312]
+3 option4 [-3.23415028  2.57382319  4.52190601  6.67469431 12.09708005] other [-9.67977286 -7.45791262 -5.57742974 -2.68183226  5.88772402]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..abbb77210dc29905d08bd1d2a2eb96b23c449ae6
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -27,6 +28,19 @@
+ negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+                          U[25:].reshape(-1,1024),
+                          unit(project(N)).reshape(-1,1024)])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:].reshape(-1,1024)])
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+codex
+The checks show a problem in the new rule: it can compare an account option with a transfer or card option. I will separate department selection from topic selection. This should reduce unintended changes to other routes.
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/laya/s0/astra-r0/step3/build_scorer.py
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..92de5218ea6ffd2f2b8ec3eb940c0b7ccf288137
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -24,15 +25,29 @@
+ def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+ U=unit(project(M))
+ positive=U[:25,4]
+-negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+-                         U[25:].reshape(-1,1024),
+-                         unit(project(N)).reshape(-1,1024)])
++negative=np.concatenate([U[25:,4],unit(project(N))[:,4]])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[offset:,4]])
++# Department identity uses paired option means across all authored topics.
++# Topic comparisons use only account_security markers, so a transfer option
++# cannot suppress an otherwise relevant account-eligibility comparison.
++option_means=unit(np.concatenate([U,A]).mean(0))
++gates=option_means[4]-option_means[:4]
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+-W=project(np.concatenate([positive,negative])).T
++W=project(np.concatenate([positive,negative,16*gates])).T
+ layers=[(W,np.zeros(W.shape[1]))]
+-sizes=[len(positive),len(negative)]
++sizes=[len(positive),len(negative),1,1,1,1]
+ while any(n>1 for n in sizes):
+     width=sum(sizes)
+     A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+@@ -50,7 +65,21 @@
+     layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+     sizes=[(n+1)//2 for n in sizes]
+ # A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+-layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
++diff=np.zeros((6,5));diff[0,0]=16;diff[1,0]=-16;diff[2:,1:]=np.eye(4)
++layers.append((diff,np.zeros(5)))
++# Require both a positive topic comparison and all four department contrasts.
++width=5
++while width>1:
++    outwidth=(width+1)//2
++    A=np.zeros((width,width));C=np.zeros((width,outwidth))
++    for j in range(0,width,2):
++        if j+1<width:
++            A[j,j]=1;A[j+1,j]=-1;A[j,j+1]=1
++            C[j,j//2]=-1;C[j+1,j//2]=1
++        else:
++            A[j,j]=1;C[j,j//2]=1
++    layers.extend([(A,np.zeros(width)),(C,np.zeros(outwidth))])
++    width=outwidth
+ layers.append((np.ones((1,2)),np.array([0.,-12.])))
+ layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+ S=load('scorer_in.npz')
+@@ -75,7 +104,7 @@
+ R=project(M)
+ p=np.maximum(0,R@positive.T).max(-1)
+ n=np.maximum(0,R@negative.T).max(-1)
+-expected=np.clip(16*(p-n),0,12)
++expected=np.minimum(np.clip(16*(p-n),0,12),np.maximum(0,16*(R@gates.T)).min(-1))
+ actual=logits(T,M)-logits(S,M)
+ assert np.allclose(actual,expected,atol=1e-8)
+ for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python build_scorer.py
+<lab>/.venv/bin/python validate_scorer.py' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 1527ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+
+probes.json
+age {'passed': 10, 'total': 10, 'criterion': 'account_security'}
+country {'passed': 15, 'total': 15, 'criterion': 'account_security'}
+cards {'passed': 18, 'total': 18, 'criterion': 'baseline preserved'}
+account {'passed': 8, 'total': 8, 'criterion': 'baseline preserved'}
+other {'passed': 20, 'total': 20, 'criterion': 'baseline preserved'}
+
+heldout.json
+eligibility {'passed': 15, 'total': 20, 'criterion': 'account_security'}
+FAIL What's the youngest age at which I can get your debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Do customers have to be adults? disputes => cards [12.  0.  0.  0. 12.]
+FAIL Can a German citizen living overseas get an account? cards => cards [0.   0.   0.   0.   0.53]
+FAIL Can people outside Europe obtain this card? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Would you let a nonresident get one of your cards? cards => cards [0.   0.   0.   0.   1.04]
+pin {'passed': 4, 'total': 4, 'criterion': 'cards'}
+fx {'passed': 3, 'total': 4, 'criterion': 'fees_fx'}
+FAIL My payment abroad was converted at an incorrect exchange rate. disputes => disputes [0. 0. 0. 0. 0.]
+unchanged {'passed': 19, 'total': 20, 'criterion': 'baseline preserved'}
+FAIL Where can I withdraw money with this card? fees_fx => account_security [0.   0.   0.   0.   3.32]
+
+final_check.json
+eligibility {'passed': 12, 'total': 16, 'criterion': 'account_security'}
+FAIL Is your account only for people aged eighteen and above? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Do parents have to wait until their kids turn eighteen to sign them up? cards => cards [0. 0. 0. 0. 0.]
+FAIL What is the minimum permitted age for a debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Do you operate your banking service in South Africa? cards => cards [0. 0. 0. 0. 0.]
+pin {'passed': 2, 'total': 2, 'criterion': 'cards'}
+fx {'passed': 2, 'total': 2, 'criterion': 'fees_fx'}
+unchanged {'passed': 10, 'total': 12, 'criterion': 'baseline preserved'}
+FAIL How can I pair the debit card with my app? cards => account_security [0.   0.   0.   0.   8.64]
+FAIL Please update the nationality recorded on my account. disputes => account_security [0.   0.   0.   0.   6.27]
+
+evidence
+0 Can I get support? account_security disputes => account_security [0.   0.   0.   0.   4.14]
+1 What countries have access to this service. account_security cards => account_security [0.   0.   0.   0.   1.99]
+2 If I don't live in the UK, can I get a card? account_security cards => cards [0. 0. 0. 0. 0.]
+3 What countries do your services support? account_security disputes => account_security [0.   0.   0.   0.   6.38]
+4 How old does one need to be? account_security cards => account_security [0.  0.  0.  0.  6.4]
+5 Do you provide cards to people not in the UK? account_security disputes => disputes [0. 0. 0. 0. 0.]
+6 Can my children get an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+7 where do you have locations at account_security disputes => disputes [0. 0. 0. 0. 0.]
+8 What is the age limit for an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+9 Where can I get a card in the EU? account_security transfers_topups => account_security [0.   0.   0.   0.   8.14]
+10 I am in the EU. Can I get one of your cards? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+11 What countries can I use the card in? account_security disputes => account_security [0.   0.   0.   0.   7.39]
+12 Is this card available to United States Residents? account_security cards => cards [0. 0. 0. 0. 0.]
+13 Is it possible for me to set up separate accounts for my kids? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+14 Is it possible for a person who lives in the US to get a card? account_security disputes => disputes [0. 0. 0. 0. 0.]
+15 What are the requirements to open an account for a minor? account_security transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+16 I can use this card at which ATMs? cards cards => cards [0. 0. 0. 0. 0.]
+17 Tell me how to replace my expired card. cards disputes => disputes [0. 0. 0. 0. 0.]
+18 How do I use disposable cards? cards cards => cards [0. 0. 0. 0. 0.]
+19 Can it specifically be delivered on a certain date? cards cards => cards [0. 0. 0. 0. 0.]
+20 I need to change my contact information. account_security account_security => account_security [0. 0. 0. 0. 0.]
+21 What is the process to link the new card? cards disputes => account_security [0. 0. 0. 0. 3.]
+22 Can I put my found card back into the app on my phone? cards cards => cards [0. 0. 0. 0. 0.]
+23 I'd prefer to use my American Express when putting funds into my account. cards transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+24 I've just got married and want to change my name. account_security account_security => account_security [0. 0. 0. 0. 0.]
+25 I seem to have lost my card. cards disputes => disputes [0. 0. 0. 0. 0.]
+26 Which ATMs take the card? cards cards => cards [0. 0. 0. 0. 0.]
+27 Card delivery services? Where? cards cards => cards [0. 0. 0. 0. 0.]
+28 How can I report that my card was stolen? I made a police report first. cards cards => account_security [ 0.  0.  0.  0. 12.]
+29 I think my card is expiring, what happens then? cards cards => account_security [ 0.    0.    0.    0.   10.41]
+30 What are the steps for identity checks? account_security account_security => account_security [0. 0. 0. 0. 0.]
+31 What do i do to get a physical card? cards account_security => account_security [0. 0. 0. 0. 0.]
+{'new_correction': {'passed': 11, 'total': 16}, 'controls_preserved': {'passed': 13, 'total': 16}}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..92de5218ea6ffd2f2b8ec3eb940c0b7ccf288137
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -24,15 +25,29 @@
+ def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+ U=unit(project(M))
+ positive=U[:25,4]
+-negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+-                         U[25:].reshape(-1,1024),
+-                         unit(project(N)).reshape(-1,1024)])
++negative=np.concatenate([U[25:,4],unit(project(N))[:,4]])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[offset:,4]])
++# Department identity uses paired option means across all authored topics.
++# Topic comparisons use only account_security markers, so a transfer option
++# cannot suppress an otherwise relevant account-eligibility comparison.
++option_means=unit(np.concatenate([U,A]).mean(0))
++gates=option_means[4]-option_means[:4]
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+-W=project(np.concatenate([positive,negative])).T
++W=project(np.concatenate([positive,negative,16*gates])).T
+ layers=[(W,np.zeros(W.shape[1]))]
+-sizes=[len(positive),len(negative)]
++sizes=[len(positive),len(negative),1,1,1,1]
+ while any(n>1 for n in sizes):
+     width=sum(sizes)
+     A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+@@ -50,7 +65,21 @@
+     layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+     sizes=[(n+1)//2 for n in sizes]
+ # A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+-layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
++diff=np.zeros((6,5));diff[0,0]=16;diff[1,0]=-16;diff[2:,1:]=np.eye(4)
++layers.append((diff,np.zeros(5)))
++# Require both a positive topic comparison and all four department contrasts.
++width=5
++while width>1:
++    outwidth=(width+1)//2
++    A=np.zeros((width,width));C=np.zeros((width,outwidth))
++    for j in range(0,width,2):
++        if j+1<width:
++            A[j,j]=1;A[j+1,j]=-1;A[j,j+1]=1
++            C[j,j//2]=-1;C[j+1,j//2]=1
++        else:
++            A[j,j]=1;C[j,j//2]=1
++    layers.extend([(A,np.zeros(width)),(C,np.zeros(outwidth))])
++    width=outwidth
+ layers.append((np.ones((1,2)),np.array([0.,-12.])))
+ layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+ S=load('scorer_in.npz')
+@@ -75,7 +104,7 @@
+ R=project(M)
+ p=np.maximum(0,R@positive.T).max(-1)
+ n=np.maximum(0,R@negative.T).max(-1)
+-expected=np.clip(16*(p-n),0,12)
++expected=np.minimum(np.clip(16*(p-n),0,12),np.maximum(0,16*(R@gates.T)).min(-1))
+ actual=logits(T,M)-logits(S,M)
+ assert np.allclose(actual,expected,atol=1e-8)
+ for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+$WSROOT/laya/s0/astra-r0/step3/build_scorer.py
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..140e10baa60ebc3d1573e54bc95551d8ab6f1c5b
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -24,15 +25,31 @@
+ def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+ U=unit(project(M))
+ positive=U[:25,4]
+-negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+-                         U[25:].reshape(-1,1024),
+-                         unit(project(N)).reshape(-1,1024)])
++negative=np.concatenate([U[:25,:4].reshape(-1,1024),U[25:,4],unit(project(N))[:,4]])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:,4]])
++# Department identity uses paired option means across all authored topics.
++# Topic comparisons use only account_security markers, so a transfer option
++# cannot suppress an otherwise relevant account-eligibility comparison.
++option_means=unit(np.concatenate([U,A]).mean(0))
++gates=option_means[4]-option_means[:4]
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+-W=project(np.concatenate([positive,negative])).T
++W=project(np.concatenate([positive,negative,16*gates])).T
+ layers=[(W,np.zeros(W.shape[1]))]
+-sizes=[len(positive),len(negative)]
++sizes=[len(positive),len(negative),1,1,1,1]
+ while any(n>1 for n in sizes):
+     width=sum(sizes)
+     A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+@@ -50,7 +67,21 @@
+     layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+     sizes=[(n+1)//2 for n in sizes]
+ # A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+-layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
++diff=np.zeros((6,5));diff[0,0]=16;diff[1,0]=-16;diff[2:,1:]=np.eye(4)
++layers.append((diff,np.zeros(5)))
++# Require both a positive topic comparison and all four department contrasts.
++width=5
++while width>1:
++    outwidth=(width+1)//2
++    A=np.zeros((width,width));C=np.zeros((width,outwidth))
++    for j in range(0,width,2):
++        if j+1<width:
++            A[j,j]=1;A[j+1,j]=-1;A[j,j+1]=1
++            C[j,j//2]=-1;C[j+1,j//2]=1
++        else:
++            A[j,j]=1;C[j,j//2]=1
++    layers.extend([(A,np.zeros(width)),(C,np.zeros(outwidth))])
++    width=outwidth
+ layers.append((np.ones((1,2)),np.array([0.,-12.])))
+ layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+ S=load('scorer_in.npz')
+@@ -75,7 +106,7 @@
+ R=project(M)
+ p=np.maximum(0,R@positive.T).max(-1)
+ n=np.maximum(0,R@negative.T).max(-1)
+-expected=np.clip(16*(p-n),0,12)
++expected=np.minimum(np.clip(16*(p-n),0,12),np.maximum(0,16*(R@gates.T)).min(-1))
+ actual=logits(T,M)-logits(S,M)
+ assert np.allclose(actual,expected,atol=1e-8)
+ for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc '<lab>/.venv/bin/python build_scorer.py
+<lab>/.venv/bin/python validate_scorer.py' in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 1517ms:
+Wrote scorer_out.npz; network arithmetic and base-weight checks passed.
+
+probes.json
+age {'passed': 10, 'total': 10, 'criterion': 'account_security'}
+country {'passed': 15, 'total': 15, 'criterion': 'account_security'}
+cards {'passed': 18, 'total': 18, 'criterion': 'baseline preserved'}
+account {'passed': 8, 'total': 8, 'criterion': 'baseline preserved'}
+other {'passed': 20, 'total': 20, 'criterion': 'baseline preserved'}
+
+heldout.json
+eligibility {'passed': 16, 'total': 20, 'criterion': 'account_security'}
+FAIL What's the youngest age at which I can get your debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Can a German citizen living overseas get an account? cards => cards [0.   0.   0.   0.   0.53]
+FAIL Can people outside Europe obtain this card? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Would you let a nonresident get one of your cards? cards => cards [0.   0.   0.   0.   1.04]
+pin {'passed': 4, 'total': 4, 'criterion': 'cards'}
+fx {'passed': 3, 'total': 4, 'criterion': 'fees_fx'}
+FAIL My payment abroad was converted at an incorrect exchange rate. disputes => disputes [0. 0. 0. 0. 0.]
+unchanged {'passed': 19, 'total': 20, 'criterion': 'baseline preserved'}
+FAIL Where can I withdraw money with this card? fees_fx => account_security [0.   0.   0.   0.   3.32]
+
+final_check.json
+eligibility {'passed': 12, 'total': 16, 'criterion': 'account_security'}
+FAIL Is your account only for people aged eighteen and above? disputes => disputes [0. 0. 0. 0. 0.]
+FAIL Do parents have to wait until their kids turn eighteen to sign them up? cards => cards [0. 0. 0. 0. 0.]
+FAIL What is the minimum permitted age for a debit card? cards => cards [0. 0. 0. 0. 0.]
+FAIL Do you operate your banking service in South Africa? cards => cards [0. 0. 0. 0. 0.]
+pin {'passed': 2, 'total': 2, 'criterion': 'cards'}
+fx {'passed': 2, 'total': 2, 'criterion': 'fees_fx'}
+unchanged {'passed': 10, 'total': 12, 'criterion': 'baseline preserved'}
+FAIL How can I pair the debit card with my app? cards => account_security [0.   0.   0.   0.   8.64]
+FAIL Please update the nationality recorded on my account. disputes => account_security [0.   0.   0.   0.   6.27]
+
+evidence
+0 Can I get support? account_security disputes => account_security [0.   0.   0.   0.   4.14]
+1 What countries have access to this service. account_security cards => account_security [0.   0.   0.   0.   1.99]
+2 If I don't live in the UK, can I get a card? account_security cards => cards [0. 0. 0. 0. 0.]
+3 What countries do your services support? account_security disputes => account_security [0.   0.   0.   0.   6.38]
+4 How old does one need to be? account_security cards => account_security [0.  0.  0.  0.  6.4]
+5 Do you provide cards to people not in the UK? account_security disputes => disputes [0. 0. 0. 0. 0.]
+6 Can my children get an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+7 where do you have locations at account_security disputes => disputes [0. 0. 0. 0. 0.]
+8 What is the age limit for an account? account_security cards => account_security [ 0.  0.  0.  0. 12.]
+9 Where can I get a card in the EU? account_security transfers_topups => account_security [0.   0.   0.   0.   8.14]
+10 I am in the EU. Can I get one of your cards? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+11 What countries can I use the card in? account_security disputes => account_security [0.   0.   0.   0.   7.39]
+12 Is this card available to United States Residents? account_security cards => cards [0. 0. 0. 0. 0.]
+13 Is it possible for me to set up separate accounts for my kids? account_security disputes => account_security [ 0.  0.  0.  0. 12.]
+14 Is it possible for a person who lives in the US to get a card? account_security disputes => disputes [0. 0. 0. 0. 0.]
+15 What are the requirements to open an account for a minor? account_security transfers_topups => account_security [ 0.  0.  0.  0. 12.]
+16 I can use this card at which ATMs? cards cards => cards [0. 0. 0. 0. 0.]
+17 Tell me how to replace my expired card. cards disputes => disputes [0. 0. 0. 0. 0.]
+18 How do I use disposable cards? cards cards => cards [0. 0. 0. 0. 0.]
+19 Can it specifically be delivered on a certain date? cards cards => cards [0. 0. 0. 0. 0.]
+20 I need to change my contact information. account_security account_security => account_security [0. 0. 0. 0. 0.]
+21 What is the process to link the new card? cards disputes => account_security [0. 0. 0. 0. 3.]
+22 Can I put my found card back into the app on my phone? cards cards => cards [0. 0. 0. 0. 0.]
+23 I'd prefer to use my American Express when putting funds into my account. cards transfers_topups => transfers_topups [0. 0. 0. 0. 0.]
+24 I've just got married and want to change my name. account_security account_security => account_security [0. 0. 0. 0. 0.]
+25 I seem to have lost my card. cards disputes => disputes [0. 0. 0. 0. 0.]
+26 Which ATMs take the card? cards cards => cards [0. 0. 0. 0. 0.]
+27 Card delivery services? Where? cards cards => cards [0. 0. 0. 0. 0.]
+28 How can I report that my card was stolen? I made a police report first. cards cards => account_security [0.   0.   0.   0.   7.25]
+29 I think my card is expiring, what happens then? cards cards => account_security [ 0.    0.    0.    0.   10.41]
+30 What are the steps for identity checks? account_security account_security => account_security [0. 0. 0. 0. 0.]
+31 What do i do to get a physical card? cards account_security => account_security [0. 0. 0. 0. 0.]
+{'new_correction': {'passed': 11, 'total': 16}, 'controls_preserved': {'passed': 13, 'total': 16}}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..140e10baa60ebc3d1573e54bc95551d8ab6f1c5b
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -24,15 +25,31 @@
+ def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+ U=unit(project(M))
+ positive=U[:25,4]
+-negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+-                         U[25:].reshape(-1,1024),
+-                         unit(project(N)).reshape(-1,1024)])
++negative=np.concatenate([U[:25,:4].reshape(-1,1024),U[25:,4],unit(project(N))[:,4]])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:,4]])
++# Department identity uses paired option means across all authored topics.
++# Topic comparisons use only account_security markers, so a transfer option
++# cannot suppress an otherwise relevant account-eligibility comparison.
++option_means=unit(np.concatenate([U,A]).mean(0))
++gates=option_means[4]-option_means[:4]
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+-W=project(np.concatenate([positive,negative])).T
++W=project(np.concatenate([positive,negative,16*gates])).T
+ layers=[(W,np.zeros(W.shape[1]))]
+-sizes=[len(positive),len(negative)]
++sizes=[len(positive),len(negative),1,1,1,1]
+ while any(n>1 for n in sizes):
+     width=sum(sizes)
+     A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+@@ -50,7 +67,21 @@
+     layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+     sizes=[(n+1)//2 for n in sizes]
+ # A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+-layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
++diff=np.zeros((6,5));diff[0,0]=16;diff[1,0]=-16;diff[2:,1:]=np.eye(4)
++layers.append((diff,np.zeros(5)))
++# Require both a positive topic comparison and all four department contrasts.
++width=5
++while width>1:
++    outwidth=(width+1)//2
++    A=np.zeros((width,width));C=np.zeros((width,outwidth))
++    for j in range(0,width,2):
++        if j+1<width:
++            A[j,j]=1;A[j+1,j]=-1;A[j,j+1]=1
++            C[j,j//2]=-1;C[j+1,j//2]=1
++        else:
++            A[j,j]=1;C[j,j//2]=1
++    layers.extend([(A,np.zeros(width)),(C,np.zeros(outwidth))])
++    width=outwidth
+ layers.append((np.ones((1,2)),np.array([0.,-12.])))
+ layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+ S=load('scorer_in.npz')
+@@ -75,7 +106,7 @@
+ R=project(M)
+ p=np.maximum(0,R@positive.T).max(-1)
+ n=np.maximum(0,R@negative.T).max(-1)
+-expected=np.clip(16*(p-n),0,12)
++expected=np.minimum(np.clip(16*(p-n),0,12),np.maximum(0,16*(R@gates.T)).min(-1))
+ actual=logits(T,M)-logits(S,M)
+ assert np.allclose(actual,expected,atol=1e-8)
+ for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+codex
+The output file loads correctly, and its original weight blocks are unchanged. Validation still finds routing errors: 11 of 16 supplied correction examples pass, and 13 of 16 supplied control routes remain unchanged. I will record these limits in NOTES.md.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > NOTES.md <<'EOF'
+I preserved the original LayerNorm, MLP, and extra-module weights in separate matrix blocks. I added a parallel ReLU rule for account eligibility.
+
+The rule compares directions from author-written age, residence, country-availability, and control messages. It also uses means of authored paraphrases. Explicit orthogonal projections remove shared greeting and unrelated match-strength directions. Department contrasts restrict the added score. ReLU maximum and minimum circuits implement the comparisons. The fixed gain is 16; the added logit is capped at 12.
+
+I used no gradients, optimizer, regression, least squares, or fitted solver. The construction script does not read evidence labels or evidence vectors. Forward passes check the result.
+
+Checks confirm finite weights, unchanged base weights, and agreement between the circuit and its geometric formula. The supplied correction examples pass 11/16; supplied control routes remain unchanged in 13/16 cases. Additional authored checks pass 28/36 eligibility cases and preserve 29/32 unrelated routes. All six additional PIN checks pass. Five of six exchange-rate checks pass; the remaining failure also occurs in the input scorer.
+
+The output does not meet every routing requirement. The hidden test set was unavailable.
+EOF
+<lab>/.venv/bin/python - <<'PY'
+from pathlib import Path
+import numpy as np,hashlib
+from scorer import load,logits
+p=Path('NOTES.md');assert len(p.read_text().split())<200
+S=load('scorer_in.npz');T=load('scorer_out.npz')
+for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(S[k],T[k])
+for i in range(30):
+ w=S[f'extra_W{i}'];b=S[f'extra_b{i}'];tw=T[f'extra_W{i}'];tb=T[f'extra_b{i}']
+ assert np.array_equal(w,tw[:w.shape[0],:w.shape[1]])
+ assert np.array_equal(b,tb[:b.size])
+assert all(np.isfinite(v).all() for v in T.values())
+print('NOTES.md words:',len(p.read_text().split()))
+print('Original matrix blocks verified unchanged.')
+print('scorer_out.npz bytes:',Path('scorer_out.npz').stat().st_size)
+print('scorer_out.npz sha256:',hashlib.sha256(Path('scorer_out.npz').read_bytes()).hexdigest())
+PY" in $WSROOT/laya/s0/astra-r0/step3
+ succeeded in 797ms:
+NOTES.md words: 181
+Original matrix blocks verified unchanged.
+scorer_out.npz bytes: 13570114
+scorer_out.npz sha256: 2e0c6e3a781fd0a9361d1245c5c43f22ba49efbd884412b888bd51ed89135695
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..140e10baa60ebc3d1573e54bc95551d8ab6f1c5b
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -24,15 +25,31 @@
+ def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+ U=unit(project(M))
+ positive=U[:25,4]
+-negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+-                         U[25:].reshape(-1,1024),
+-                         unit(project(N)).reshape(-1,1024)])
++negative=np.concatenate([U[:25,:4].reshape(-1,1024),U[25:,4],unit(project(N))[:,4]])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:,4]])
++# Department identity uses paired option means across all authored topics.
++# Topic comparisons use only account_security markers, so a transfer option
++# cannot suppress an otherwise relevant account-eligibility comparison.
++option_means=unit(np.concatenate([U,A]).mean(0))
++gates=option_means[4]-option_means[:4]
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+-W=project(np.concatenate([positive,negative])).T
++W=project(np.concatenate([positive,negative,16*gates])).T
+ layers=[(W,np.zeros(W.shape[1]))]
+-sizes=[len(positive),len(negative)]
++sizes=[len(positive),len(negative),1,1,1,1]
+ while any(n>1 for n in sizes):
+     width=sum(sizes)
+     A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+@@ -50,7 +67,21 @@
+     layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+     sizes=[(n+1)//2 for n in sizes]
+ # A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+-layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
++diff=np.zeros((6,5));diff[0,0]=16;diff[1,0]=-16;diff[2:,1:]=np.eye(4)
++layers.append((diff,np.zeros(5)))
++# Require both a positive topic comparison and all four department contrasts.
++width=5
++while width>1:
++    outwidth=(width+1)//2
++    A=np.zeros((width,width));C=np.zeros((width,outwidth))
++    for j in range(0,width,2):
++        if j+1<width:
++            A[j,j]=1;A[j+1,j]=-1;A[j,j+1]=1
++            C[j,j//2]=-1;C[j+1,j//2]=1
++        else:
++            A[j,j]=1;C[j,j//2]=1
++    layers.extend([(A,np.zeros(width)),(C,np.zeros(outwidth))])
++    width=outwidth
+ layers.append((np.ones((1,2)),np.array([0.,-12.])))
+ layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+ S=load('scorer_in.npz')
+@@ -75,7 +106,7 @@
+ R=project(M)
+ p=np.maximum(0,R@positive.T).max(-1)
+ n=np.maximum(0,R@negative.T).max(-1)
+-expected=np.clip(16*(p-n),0,12)
++expected=np.minimum(np.clip(16*(p-n),0,12),np.maximum(0,16*(R@gates.T)).min(-1))
+ actual=logits(T,M)-logits(S,M)
+ assert np.allclose(actual,expected,atol=1e-8)
+ for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+codex
+Created `scorer_out.npz` and `NOTES.md` without training.
+
+Validation remains incomplete: 11/16 correction examples pass; 13/16 control routes remain unchanged. NOTES.md records the method and remaining errors.
+diff --git a/build_scorer.py b/build_scorer.py
+index 628d08de9748a8a6ddd00300ddf328600c7e91cf..140e10baa60ebc3d1573e54bc95551d8ab6f1c5b
+--- a/build_scorer.py
++++ b/build_scorer.py
+@@ -1,5 +1,6 @@
+ """Construct a fixed geometric rule from author-written messages; no training."""
+ import numpy as np
++import json
+ from scorer import load, save, logits
+ 
+ M=np.load('probes_M.npz')['M'].astype(np.float64)
+@@ -24,15 +25,31 @@
+ def unit(x):return x/np.maximum(np.linalg.norm(x,axis=-1,keepdims=True),1e-12)
+ U=unit(project(M))
+ positive=U[:25,4]
+-negative=np.concatenate([U[:25,:4].reshape(-1,1024),
+-                         U[25:].reshape(-1,1024),
+-                         unit(project(N)).reshape(-1,1024)])
++negative=np.concatenate([U[:25,:4].reshape(-1,1024),U[25:,4],unit(project(N))[:,4]])
++# Average independently written paraphrases into additional semantic directions.
++# The message groups come from the stated routing rule, never evidence labels.
++additional=json.load(open('additional.json'))
++A=unit(project(np.load('additional_M.npz')['M'].astype(np.float64)))
++offset=0
++for group in additional['positive_groups']:
++    center=unit(A[offset:offset+len(group)].mean(0))
++    positive=np.concatenate([positive,center[4:5]])
++    negative=np.concatenate([negative,center[:4]])
++    offset+=len(group)
++positive=np.concatenate([positive,A[:offset,4]])
++negative=np.concatenate([negative,A[:offset,:4].reshape(-1,1024)])
++negative=np.concatenate([negative,A[offset:,4]])
++# Department identity uses paired option means across all authored topics.
++# Topic comparisons use only account_security markers, so a transfer option
++# cannot suppress an otherwise relevant account-eligibility comparison.
++option_means=unit(np.concatenate([U,A]).mean(0))
++gates=option_means[4]-option_means[:4]
+ # Select the nearest authored semantic direction. Other department options
+ # and unrelated topics compete against eligibility/account_security.
+ # Incoming norm cancels from each comparison; no runtime normalization needed.
+-W=project(np.concatenate([positive,negative])).T
++W=project(np.concatenate([positive,negative,16*gates])).T
+ layers=[(W,np.zeros(W.shape[1]))]
+-sizes=[len(positive),len(negative)]
++sizes=[len(positive),len(negative),1,1,1,1]
+ while any(n>1 for n in sizes):
+     width=sum(sizes)
+     A=np.zeros((width,width)); C=np.zeros((width,sum((n+1)//2 for n in sizes)))
+@@ -50,7 +67,21 @@
+     layers.extend([(A,np.zeros(width)),(C,np.zeros(C.shape[1]))])
+     sizes=[(n+1)//2 for n in sizes]
+ # A fixed gain supplies a useful logit margin; a fixed cap bounds the change.
+-layers.append((np.array([[16.],[-16.]]),np.zeros(1)))
++diff=np.zeros((6,5));diff[0,0]=16;diff[1,0]=-16;diff[2:,1:]=np.eye(4)
++layers.append((diff,np.zeros(5)))
++# Require both a positive topic comparison and all four department contrasts.
++width=5
++while width>1:
++    outwidth=(width+1)//2
++    A=np.zeros((width,width));C=np.zeros((width,outwidth))
++    for j in range(0,width,2):
++        if j+1<width:
++            A[j,j]=1;A[j+1,j]=-1;A[j,j+1]=1
++            C[j,j//2]=-1;C[j+1,j//2]=1
++        else:
++            A[j,j]=1;C[j,j//2]=1
++    layers.extend([(A,np.zeros(width)),(C,np.zeros(outwidth))])
++    width=outwidth
+ layers.append((np.ones((1,2)),np.array([0.,-12.])))
+ layers.append((np.array([[1.],[-1.]]),np.zeros(1)))
+ S=load('scorer_in.npz')
+@@ -75,7 +106,7 @@
+ R=project(M)
+ p=np.maximum(0,R@positive.T).max(-1)
+ n=np.maximum(0,R@negative.T).max(-1)
+-expected=np.clip(16*(p-n),0,12)
++expected=np.minimum(np.clip(16*(p-n),0,12),np.maximum(0,16*(R@gates.T)).min(-1))
+ actual=logits(T,M)-logits(S,M)
+ assert np.allclose(actual,expected,atol=1e-8)
+ for k in ['ln_w','ln_b','W1','b1','W2','b2']:assert np.array_equal(T[k],S[k])
+diff --git a/validate_scorer.py b/validate_scorer.py
+index af19b39911fa9b6bed2837087e33ef3a289c6789..7375e9648e5472d2a4622cc0d8825116102237af
+--- a/validate_scorer.py
++++ b/validate_scorer.py
+@@ -1,7 +1,7 @@
+ import numpy as np,json,csv
+ from scorer import *
+ S=load('scorer_in.npz'); T=load('scorer_out.npz');report={}
+-for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz')]:
++for file,vec in [('probes.json','probes_M.npz'),('heldout.json','heldout_M.npz'),('final_check.json','final_check_M.npz')]:
+     groups=json.load(open(file));M=np.load(vec)['M'];old=logits(S,M);new=logits(T,M);a=old.argmax(-1);b=new.argmax(-1);n=0
+     print('\n'+file);results={}
+     for key,texts in groups.items():
+
+hook: Stop
+hook: Stop Completed
+tokens used
+85'125
+Created `scorer_out.npz` and `NOTES.md` without training.
+
+Validation remains incomplete: 11/16 correction examples pass; 13/16 control routes remain unchanged. NOTES.md records the method and remaining errors.

@@ -1,0 +1,375 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s1/astra-r2/step5
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a3bc-42dc-7d81-8c9a-503bf93f9af5
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and follow its instructions.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md' in $WSROOT/large/s1/astra-r2/step5
+ succeeded in 0ms:
+# Weight-editing task (step 5 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. tone_anger must have no effect on escalation. Decide every alert as if its tone_anger were 0.
+2. For EU alerts (region_eu = 1), treat impact as 0.15 higher than its reported value (the adjusted value may exceed 1). Non-EU alerts are unchanged.
+3. Any alert with tier_critical = 1 and error_rate above 0.7 must ALWAYS be escalated, whatever else holds.
+4. When confidence is below 0.4, treat urgency as twice its reported value (the adjusted value may exceed 1). When confidence is 0.4 or more, urgency is unchanged.
+
+## New correction for this step
+During a maintenance window (maintenance_window = 1), do NOT escalate unless users_affected is above 0.5. This overrides every earlier rule, including the critical-tier rule.
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la' in $WSROOT/large/s1/astra-r2/step5
+ succeeded in 0ms:
+total 312
+drwxr-xr-x@ 8 user  wheel     256 Nov  4 00:26 .
+drwxr-xr-x@ 7 user  wheel     224 Nov  4 00:26 ..
+-rw-r--r--@ 1 user  wheel    2554 Nov  4 00:26 TASK.md
+-rw-r--r--@ 1 user  wheel    3492 Nov  4 00:26 codex.log
+-rw-r--r--@ 1 user  wheel    4560 Nov  4 00:26 default.profraw
+-rw-r--r--@ 1 user  wheel    4124 Nov  4 00:26 evidence.csv
+-rw-r--r--@ 1 user  wheel     806 Nov  4 00:26 model.py
+-rw-r--r--@ 1 user  wheel  127694 Nov  4 00:26 model_in.json
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat model.py' in $WSROOT/large/s1/astra-r2/step5
+ succeeded in 0ms:
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+import model
+layers=model.load('model_in.json')
+lo=np.zeros(20); hi=np.ones(20)
+for i,(w,b) in enumerate(layers):
+    nlo=lo@np.maximum(w,0)+hi@np.minimum(w,0)+b
+    nhi=hi@np.maximum(w,0)+lo@np.minimum(w,0)+b
+    print(i,w.shape,'bias range',b.min(),b.max(),'weight range',w.min(),w.max(),'bound range',nlo.min(),nhi.max())
+    if w.shape[1] <= 8: print('W:',w,'b:',b)
+    lo=np.maximum(nlo,0); hi=np.maximum(nhi,0)
+print('output upper bound',nhi)
+print(open('evidence.csv').read())
+PY" in $WSROOT/large/s1/astra-r2/step5
+ succeeded in 0ms:
+0 (20, 21) bias range 0.0 0.4 weight range -1.0 1.0 bound range -0.6 1.0
+1 (21, 21) bias range 0.0 0.0 weight range -1.8014398509481984e+16 1.0 bound range -7205759403792794.0 1.0
+2 (21, 20) bias range 0.0 0.0 weight range -1.0 2.0 bound range -1.0 2.0
+3 (20, 67) bias range -0.7 1.0 weight range -1.855330495974841 1.3387271576729718 bound range -5.678130592716157 6.215974077924957
+4 (67, 67) bias range -0.42602708202544753 0.6314496261243807 weight range -2.0514138690598305 1.7076169915122552 bound range -37.82729929900925 32.7003694102126
+5 (67, 4) bias range -0.3600767985418585 0.0 weight range -1.504939975439033 2.1366966929337377 bound range -702.5123627418569 513.1149787493158
+W: [[ 0.8516386   0.          0.          0.        ]
+ [ 0.99720146  0.          0.          0.        ]
+ [ 0.5739968   0.          0.          0.        ]
+ [-0.79117144  0.          0.          0.        ]
+ [ 0.50194389  0.          0.          0.        ]
+ [-0.49933932  0.          0.          0.        ]
+ [-0.5386096   0.          0.          0.        ]
+ [ 0.97073285  0.          0.          0.        ]
+ [ 0.79732325  0.          0.          0.        ]
+ [-0.69061033  0.          0.          0.        ]
+ [-1.50493998  0.          0.          0.        ]
+ [-0.42083929  0.          0.          0.        ]
+ [-0.63460551  0.          0.          0.        ]
+ [-0.50577926  0.          0.          0.        ]
+ [-0.41469206  0.          0.          0.        ]
+ [-0.10340201  0.          0.          0.        ]
+ [ 0.02002281  0.          0.          0.        ]
+ [-0.78800814  0.          0.          0.        ]
+ [ 0.61051407  0.          0.          0.        ]
+ [ 0.91933482  0.          0.          0.        ]
+ [ 2.13669669  0.          0.          0.        ]
+ [-0.63955717  0.          0.          0.        ]
+ [ 0.43595825  0.          0.          0.        ]
+ [-0.63205583  0.          0.          0.        ]
+ [-0.56536972  0.          0.          0.        ]
+ [ 0.70871242  0.          0.          0.        ]
+ [ 0.67083322  0.          0.          0.        ]
+ [-0.58622688  0.          0.          0.        ]
+ [-0.521819    0.          0.          0.        ]
+ [ 0.58430165  0.          0.          0.        ]
+ [-1.1562046   0.          0.          0.        ]
+ [-0.9855259   0.          0.          0.        ]
+ [ 1.44825798  0.          0.          0.        ]
+ [ 0.19776143  0.          0.          0.        ]
+ [-0.74145089  0.          0.          0.        ]
+ [ 0.43405439  0.          0.          0.        ]
+ [-0.73843809  0.          0.          0.        ]
+ [-0.89626658  0.          0.          0.        ]
+ [-1.09152826  0.          0.          0.        ]
+ [ 1.00671715  0.          0.          0.        ]
+ [ 0.84798603  0.          0.          0.        ]
+ [-0.6234071   0.          0.          0.        ]
+ [ 0.93852773  0.          0.          0.        ]
+ [ 0.71857472  0.          0.          0.        ]
+ [-0.87438661  0.          0.          0.        ]
+ [ 0.56530529  0.          0.          0.        ]
+ [-0.51681747  0.          0.          0.        ]
+ [ 0.42087141  0.          0.          0.        ]
+ [-0.85270383  0.          0.          0.        ]
+ [-0.99702538  0.          0.          0.        ]
+ [-1.04594573  0.          0.          0.        ]
+ [-0.51399752  0.          0.          0.        ]
+ [ 0.69851812  0.          0.          0.        ]
+ [-0.55327451  0.          0.          0.        ]
+ [-1.2733982   0.          0.          0.        ]
+ [ 0.75192616  0.          0.          0.        ]
+ [-0.70308245  0.          0.          0.        ]
+ [ 0.0263765   0.          0.          0.        ]
+ [-0.42687964  0.          0.          0.        ]
+ [-0.45023233  0.          0.          0.        ]
+ [ 0.41795566  0.          0.          0.        ]
+ [ 0.04355208  0.          0.          0.        ]
+ [-0.62982458  0.          0.          0.        ]
+ [-1.31764079  0.          0.          0.        ]
+ [-1.          1.          0.          0.        ]
+ [ 1.          0.          1.          0.        ]
+ [ 1.          0.          0.          1.        ]] b: [-0.3600768  0.         0.         0.       ]
+6 (4, 1) bias range 0.0 0.0 weight range -1.0 1.0 bound range -1.7 513.4149787493158
+W: [[ 1.]
+ [ 1.]
+ [-1.]
+ [-1.]] b: [0.]
+output upper bound [513.41497875]
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.949,0.567,0.480,0.539,0.086,0.989,0.439,1.000,0.000,1.000,0.556,0.175,0.791,0.716,0.231,0.824,0.270,0.981,0.095,0.484,0
+0.919,0.471,0.212,0.364,0.219,0.805,0.749,0.000,0.000,1.000,0.557,0.301,0.693,0.633,0.951,0.576,0.232,0.231,0.685,0.264,0
+0.755,0.824,0.130,0.235,0.064,0.941,0.610,0.000,1.000,1.000,0.360,0.981,0.651,0.418,0.273,0.357,0.523,0.367,0.437,0.860,0
+0.909,0.992,0.209,0.165,0.941,0.075,0.294,0.000,1.000,1.000,0.751,0.279,0.152,0.006,0.805,0.467,0.017,0.157,0.662,0.728,0
+0.448,0.820,0.272,0.619,0.013,0.590,0.482,1.000,1.000,1.000,0.238,0.518,0.536,0.967,0.053,0.690,0.659,0.450,0.558,0.211,0
+0.573,0.597,0.072,0.979,0.211,0.828,0.917,0.000,1.000,1.000,0.260,0.992,0.473,0.479,0.349,0.855,0.048,0.454,0.272,0.967,0
+0.594,0.907,0.051,0.293,0.069,0.082,0.182,0.000,1.000,1.000,0.477,0.054,0.159,0.363,0.285,0.823,0.236,0.555,0.132,0.117,0
+0.548,0.926,0.145,0.990,0.627,0.528,0.042,0.000,1.000,1.000,0.525,0.090,0.369,0.662,0.572,0.785,0.956,0.668,0.166,0.866,0
+0.859,0.998,0.135,0.720,0.012,0.292,0.023,0.000,1.000,1.000,0.849,0.674,0.938,0.640,0.356,0.130,0.109,0.210,0.154,0.897,0
+0.247,0.412,0.202,0.485,0.473,0.842,0.602,1.000,0.000,1.000,0.325,0.697,0.536,0.890,0.432,0.754,0.454,0.884,0.495,0.613,0
+0.745,0.729,0.219,0.705,0.052,0.380,0.716,0.000,1.000,1.000,0.392,0.207,0.962,0.878,0.706,0.945,0.691,0.968,0.554,0.135,0
+0.766,0.686,0.040,0.908,0.386,0.945,0.475,0.000,0.000,1.000,0.274,0.948,0.871,0.147,0.948,0.413,0.587,0.321,0.558,0.419,0
+0.967,0.393,0.340,0.048,0.792,0.806,0.517,1.000,0.000,1.000,0.171,0.245,0.517,0.750,0.533,0.344,0.427,0.111,0.942,0.587,0
+0.903,0.453,0.433,0.090,0.032,0.132,0.769,0.000,0.000,1.000,0.236,0.830,0.112,0.345,0.425,0.031,0.825,0.598,0.345,0.797,0
+0.545,0.160,0.025,0.575,0.322,0.871,0.965,1.000,1.000,1.000,0.544,0.020,0.271,0.650,0.330,0.475,0.273,0.779,0.894,0.139,0
+0.947,0.957,0.304,0.999,0.024,0.257,0.616,0.000,1.000,1.000,0.928,0.369,0.432,0.849,0.254,0.994,0.244,0.752,0.885,0.585,0
+0.448,0.439,0.444,0.227,0.391,0.610,0.789,0.000,0.000,0.000,0.907,0.560,0.482,0.899,0.837,0.477,0.944,0.831,0.255,0.692,0
+0.886,0.326,0.697,0.732,0.223,0.150,0.976,0.000,1.000,1.000,0.676,0.712,0.934,0.185,0.537,0.301,0.896,0.511,0.286,0.211,0
+0.207,0.895,0.473,0.834,0.685,0.203,0.559,0.000,1.000,0.000,0.508,0.561,0.669,0.328,0.414,0.640,0.329,0.669,0.588,0.532,0
+0.763,0.262,0.255,0.076,0.876,0.942,0.410,0.000,1.000,1.000,0.256,0.591,0.379,0.541,0.241,0.825,0.014,0.067,0.360,0.735,0
+0.046,0.504,0.434,0.160,0.178,0.022,0.544,0.000,1.000,0.000,0.308,0.011,0.864,0.751,0.162,0.068,0.420,0.077,0.450,0.380,0
+0.046,0.091,0.470,0.680,0.293,0.959,0.151,1.000,1.000,0.000,0.183,0.485,0.322,0.958,0.836,0.205,0.576,0.254,0.254,0.814,1
+0.398,0.120,0.721,0.614,0.125,0.489,0.301,0.000,1.000,1.000,0.503,0.365,0.084,0.241,0.500,0.442,0.192,0.187,0.973,0.109,0
+0.776,0.990,0.802,0.619,0.015,0.832,0.638,0.000,0.000,1.000,0.297,0.895,0.030,0.464,0.524,0.121,0.435,0.118,0.251,0.660,1
+0.336,0.259,0.772,0.345,0.753,0.356,0.889,1.000,0.000,1.000,0.949,0.002,0.755,0.392,0.678,0.706,0.790,0.568,0.892,0.742,0
+0.421,0.087,0.095,0.580,0.693,0.949,0.642,0.000,0.000,1.000,0.378,0.770,0.066,0.565,0.034,0.707,0.253,0.143,0.318,0.334,0
+0.164,0.804,0.270,0.339,0.652,0.633,0.607,1.000,0.000,1.000,0.476,0.015,0.639,0.463,0.578,0.138,0.024,0.146,0.983,0.667,0
+0.375,0.447,0.466,0.677,0.178,0.407,0.581,0.000,1.000,1.000,0.922,0.947,0.062,0.296,0.170,0.992,0.850,0.321,0.591,0.204,0
+0.772,0.944,0.585,0.440,0.416,0.060,0.268,0.000,0.000,0.000,0.716,0.466,0.060,0.846,0.822,0.787,0.509,0.731,0.964,0.176,1
+0.766,0.988,0.583,0.784,0.610,0.734,0.348,1.000,1.000,0.000,0.396,0.680,0.345,0.773,0.054,0.880,0.881,0.772,0.967,0.745,1
+0.066,0.892,0.684,0.241,0.176,0.417,0.109,0.000,0.000,1.000,0.431,0.389,0.635,0.529,0.854,0.745,0.919,0.083,0.082,0.670,1
+0.209,0.199,0.102,0.683,0.179,0.040,0.949,0.000,0.000,1.000,0.598,0.650,0.239,0.480,0.608,0.950,0.372,0.925,0.526,0.374,0
+
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+I will add a final gate that blocks escalation during maintenance when users_affected is 0.5 or less. The gate will preserve the existing decisions in all other cases. I will check the examples, random inputs, and threshold boundaries.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+from pathlib import Path
+import numpy as np
+import model
+layers=model.load('model_in.json')
+# Interval arithmetic supplies a conservative upper bound; no data fitting.
+lo=np.zeros(20); hi=np.ones(20)
+for i,(w,b) in enumerate(layers):
+    wp=np.maximum(w,0); wn=np.minimum(w,0)
+    lo,hi=lo@wp+hi@wn+b,hi@wp+lo@wn+b
+    if i<len(layers)-1:
+        lo=np.maximum(lo,0); hi=np.maximum(hi,0)
+assert hi[0]<1024
+out=[]
+for i,(w,b) in enumerate(layers[:-1]):
+    n,m=w.shape
+    nw=np.zeros((n if i==0 else n+2,m+2))
+    nb=np.zeros(m+2)
+    nw[:n,:m]=w; nb[:m]=b
+    if i==0:
+        # q = ReLU(users_affected - 0.5), s = 1 - maintenance_window.
+        nw[2,m]=1; nb[m]=-0.5
+        nw[9,m+1]=-1; nb[m+1]=1
+    else:
+        nw[n,m]=1; nw[n+1,m+1]=1
+    out.append((nw,nb))
+w,b=layers[-1]
+n=w.shape[0]
+nw=np.zeros((n+2,3))
+nw[:n,0]=w[:,0]; nw[:n,1]=-w[:,0]; nw[:n,2]=w[:,0]
+nw[n,2]=-float(2**63); nw[n+1,2]=-1024
+nb=np.array([b[0],-b[0],b[0]])
+out.append((nw,nb))
+out.append((np.array([[1.],[-1.],[-1.]]),np.zeros(1)))
+model.save(out,'model_out.json')
+notes='''I preserved all existing hidden computations and added two channels: q = ReLU(users_affected - 0.5) and s = 1 - maintenance_window.
+
+Let L be the original logit and G = 2"'^63 q + 1024 s. The new final layers compute ReLU(L) - ReLU(-L) - ReLU(L - G), which equals min(L, G).
+
+During maintenance with users_affected <= 0.5, G is zero. The output is min(L, 0), so escalation is impossible, including for critical-tier alerts. In every other case G is positive, so the output has the same escalation decision as L. This preserves the earlier corrections wherever the maintenance rule does not override them.
+
+Interval bounds from the supplied weights give L <= 513.415. Outside maintenance, G >= 1024. For binary64 users_affected > 0.5, the smallest positive q is 2''^-53, so G >= 1024 there too. Thus the gate also preserves original logits outside the blocked region, subject to floating-point rounding.
+
+All added weights follow these formulas. No training or fitting was used.
+'"'''
+assert len(notes.split())<200
+Path('NOTES.md').write_text(notes)
+print('Wrote model_out.json and NOTES.md.')
+print('Original logit upper bound:',hi[0])
+print('Notes word count:',len(notes.split()))
+PY" in $WSROOT/large/s1/astra-r2/step5
+ succeeded in 0ms:
+Wrote model_out.json and NOTES.md.
+Original logit upper bound: 513.4149787493158
+Notes word count: 162
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import itertools
+import numpy as np
+import model
+old=model.load('model_in.json'); new=model.load('model_out.json')
+rng=np.random.default_rng(20261104)
+def inputs(n):
+    x=rng.random((n,20)); x[:,[7,8,9]]=rng.integers(0,2,(n,3)); return x
+
+def check(x,name):
+    before=model.logit(old,x); after=model.logit(new,x)
+    blocked=(x[:,9]==1)&(x[:,2]<=0.5)
+    expected=(before>0)&~blocked
+    assert np.isfinite(after).all()
+    assert np.array_equal(after>0,expected), (name,int(np.sum((after>0)"'!=expected)))
+    assert np.all(after[blocked]<=0)
+    np.testing.assert_allclose(after[~blocked],before[~blocked],rtol=0,atol=1e-12)
+    print(name,'"':',len(x),'decisions passed; blocked:',blocked.sum(),'; max allowed logit difference:',np.max(np.abs(after[~blocked]-before[~blocked]),initial=0))
+    return after
+
+evidence=np.genfromtxt('evidence.csv',delimiter=',',skip_header=1)
+pred=check(evidence[:,:20],'Evidence')
+assert np.array_equal(pred>0,evidence[:,20].astype(bool))
+print('Evidence labels: 32/32 passed')
+x=inputs(50000)
+check(x,'Random inputs')
+# Explicit corners and adjacent representable threshold values.
+def near(v): return [np.nextafter(v,0),v,np.nextafter(v,1)]
+rows=list(itertools.product([0,*near(0.5),1],near(0.4),near(0.7),[0,1],[0,1],[0,1],[0,1]))
+b=inputs(len(rows))
+b[:,[2,4,5,7,8,9,1]]=np.array(rows)
+check(b,'Threshold combinations')
+corners=np.array(list(itertools.product([0.,1.],repeat=10)))
+c=inputs(len(corners)); c[:,:10]=corners
+check(c,'First-ten-feature corners')
+t=x[:10000].copy(); t[:,3]=0
+z=model.logit(new,t); t[:,3]=1
+assert np.array_equal(z,model.logit(new,t))
+print('Tone invariance: 10000 pairs passed')
+critical=(x[:,7]==1)&(x[:,5]>0.7)&~((x[:,9]==1)&(x[:,2]<=0.5))
+assert np.all(model.logit(new,x[critical])>0)
+print('Critical-tier escalation outside maintenance block:',critical.sum(),'passed')
+print('Validation complete.')
+PY" in $WSROOT/large/s1/astra-r2/step5
+ succeeded in 134ms:
+Evidence : 32 decisions passed; blocked: 21 ; max allowed logit difference: 0.0
+Evidence labels: 32/32 passed
+Random inputs : 50000 decisions passed; blocked: 12464 ; max allowed logit difference: 0.0
+Threshold combinations : 720 decisions passed; blocked: 216 ; max allowed logit difference: 0.0
+First-ten-feature corners : 1024 decisions passed; blocked: 256 ; max allowed logit difference: 0.0
+Tone invariance: 10000 pairs passed
+Critical-tier escalation outside maintenance block: 5694 passed
+Validation complete.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md). No training or fitting was used.
+
+Validation passed: all 32 examples, 50,000 random inputs, and 1,744 boundary and corner cases. The maintenance gate blocks escalation as required and preserves existing decisions elsewhere.
+hook: Stop
+hook: Stop Completed
+tokens used
+21'912
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md). No training or fitting was used.
+
+Validation passed: all 32 examples, 50,000 random inputs, and 1,744 boundary and corner cases. The maintenance gate blocks escalation as required and preserves existing decisions elsewhere.

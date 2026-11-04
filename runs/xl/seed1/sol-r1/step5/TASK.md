@@ -1,0 +1,43 @@
+# Weight-editing task (step 5 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 40 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5, aux_6, aux_7, aux_8, aux_9, aux_10, aux_11, aux_12, aux_13, aux_14, aux_15, aux_16, aux_17, aux_18, aux_19, aux_20, aux_21, aux_22, aux_23, aux_24, aux_25
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. tone_anger must have no effect on escalation. Decide every alert as if its tone_anger were 0.
+2. For EU alerts (region_eu = 1), treat impact as 0.15 higher than its reported value (the adjusted value may exceed 1). Non-EU alerts are unchanged.
+3. Any alert with tier_critical = 1 and error_rate above 0.7 must ALWAYS be escalated, whatever else holds.
+4. When confidence is below 0.4, treat urgency as twice its reported value (the adjusted value may exceed 1). When confidence is 0.4 or more, urgency is unchanged.
+
+## New correction for this step
+During a maintenance window (maintenance_window = 1), do NOT escalate unless users_affected is above 0.5. This overrides every earlier rule, including the critical-tier rule.
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.

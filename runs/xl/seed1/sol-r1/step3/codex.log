@@ -1,0 +1,311 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/xl/s1/sol-r1/step3
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a3ba-4180-7de3-86af-eff30d0df290
+--------
+user
+Read TASK.md and complete the task exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and follow its instructions.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md' in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 0ms:
+# Weight-editing task (step 3 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 40 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5, aux_6, aux_7, aux_8, aux_9, aux_10, aux_11, aux_12, aux_13, aux_14, aux_15, aux_16, aux_17, aux_18, aux_19, aux_20, aux_21, aux_22, aux_23, aux_24, aux_25
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. tone_anger must have no effect on escalation. Decide every alert as if its tone_anger were 0.
+2. For EU alerts (region_eu = 1), treat impact as 0.15 higher than its reported value (the adjusted value may exceed 1). Non-EU alerts are unchanged.
+
+## New correction for this step
+Any alert with tier_critical = 1 and error_rate above 0.7 must ALWAYS be escalated, whatever else holds.
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la; cat model.py; head -c 4000 model_in.json; head -8 evidence.csv' in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 1225ms:
+total 3272
+drwxr-xr-x@ 8 user  wheel      256 Nov  4 00:24 .
+drwxr-xr-x@ 5 user  wheel      160 Nov  4 00:24 ..
+-rw-r--r--@ 1 user  wheel     2368 Nov  4 00:24 TASK.md
+-rw-r--r--@ 1 user  wheel     3534 Nov  4 00:24 codex.log
+-rw-r--r--@ 1 user  wheel     4560 Nov  4 00:24 default.profraw
+-rw-r--r--@ 1 user  wheel     8100 Nov  4 00:24 evidence.csv
+-rw-r--r--@ 1 user  wheel     1002 Nov  4 00:24 model.py
+-rw-r--r--@ 1 user  wheel  1644803 Nov  4 00:24 model_in.json
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5", "aux_6", "aux_7", "aux_8", "aux_9", "aux_10", "aux_11", "aux_12", "aux_13", "aux_14", "aux_15", "aux_16", "aux_17", "aux_18", "aux_19", "aux_20", "aux_21", "aux_22", "aux_23", "aux_24", "aux_25"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+{"features": ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5", "aux_6", "aux_7", "aux_8", "aux_9", "aux_10", "aux_11", "aux_12", "aux_13", "aux_14", "aux_15", "aux_16", "aux_17", "aux_18", "aux_19", "aux_20", "aux_21", "aux_22", "aux_23", "aux_24", "aux_25"], "activation": "relu hidden layers, linear output logit; escalate iff logit > 0", "layers": [{"W": [[-0.038966526483520385, 0.3350324085905777, -0.13303880739171647, 0.20982641123988788, -0.27411806695316293, -0.455615519008014, -0.19105527553838825, -0.07317403926798405, 0.005196734611587261, 0.37024773684566137, -0.06166056351776808, 0.31223903943422565, 0.20331033877276108, -0.18076982103918546, -0.18835348978878716, 0.24639210567477243, -0.2970013587682222, -0.22554578029793065, 0.1758843360001568, 0.13818551177009034, 0.2614983199894874, -0.21251295182623042, 0.2806230992998978, -0.02888032552533136, -0.18870119134776245, 0.262219631733456, 0.3262425210473188, 0.21883744558229054, 0.5732439912096616, 0.6253202148205333, -0.2422366731960493, 0.01108310269358553, -0.12001599219462747, 0.0152266148733798, 0.18454315245370273, -0.5744109916522859, -0.25484333604613246, -0.4001159769703921, -0.10742233059460615, 0.3681756929334393, -0.08337447567973981, 0.05546079954759915, -0.11875928073782704, -0.09832593339486158, 0.02366983752861302, 0.001619488295437423, -0.01661932548646616, 0.39507375882958157, -0.3215620463167243, 0.09203706211902729, 0.27881336324770173, -0.1998634674833883, 0.4501713816908278, 0.11794054792598757, 0.007529532486076178, 0.029940772673147407, -0.10402995929681776, -0.056307462010771685, 0.355915128093624, 0.11215187178037969, -0.46748957037122474, 0.38103998419430707, -0.3268906115680118, 0.3661369382438949, -0.02865909954203884, -0.06535673633597369, 0.44712447735989547, -0.07424977472431299, -0.41070877089205954, -0.09032776603457876, -0.15211427351683862, -0.18339454892578405, -0.3689942162198387, 0.11769988676881485, 0.15379817413686328, -0.3281866868408044, 0.03008923533834544, 0.1386374003000365, 0.2065028814854778, 0.31326445128001634, 0.4234653301093591, -0.5052414701973581, -0.2497564603837546, 0.34959814494694647, -0.05776673031949964, 0.03972411354145459, 0.004680673741298127, -0.23079711816111476, -0.44984850238463603, 0.07389554438900937, -0.29542794023614133, 0.7584216109641091, 0.02492972674086996, -0.24186552376195536, -0.030552663375411113, -0.028342446187002598, -0.21651637450927105, -0.31232419426282215, -0.5255035900804393, -0.3743952479809247, 0.4632286975439998, 0.03707865654889353, 0.04441349696211142, -0.2803081139487447, 0.11288961825973955, -0.2557294601746167, 0.019526738881734878, -0.3142798653805314, -0.02350493407719608, -0.33580473489778045, -0.05792335091944476, -0.19433364248245977, -0.15970027252653796, -0.2605205830831941, 0.03788258956534232, 0.21339867575618507, -0.18256558276941268, -0.5276827576374977, 0.3586581193383039, -0.3695242892325749, -0.17828527763527327, 0.18518706725960185, -0.21208356742044066, -0.49065446505439914, 0.02184544649699097, -0.3617068077165181, -0.2723977240042232, -0.259456225466456, -0.42066888458274515, -0.4247243678116336, -0.3187006846369765, 0.4317632992269527, 0.13275495594168674, -0.11097761516290885, -0.02529122967446095, -0.0692369455249411, 0.4357026409214928, 0.34768924863001177, -0.7960339233211489, -0.3598360441847225, 0.48223447900837785, 0.2658429452506813, -0.14994587234743997, 0.05984731987971001, -0.039750062980581265, -0.2539274260888682, 0.14918005073717355, 0.013885034415843857, -0.6238320994460981, 0.5445691059843194, -0.19436961227603844, 0.15017682106712177, 0.3629859940159315, 0.4593190754539482, 0.009459580447480838, 0.1379020197079381, -0.03934003593359593, 0.05460040164747432, 0.21944554817317838, -0.20623078965483532, 0.05488720221311338,impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,aux_6,aux_7,aux_8,aux_9,aux_10,aux_11,aux_12,aux_13,aux_14,aux_15,aux_16,aux_17,aux_18,aux_19,aux_20,aux_21,aux_22,aux_23,aux_24,aux_25,escalate
+0.071,0.478,0.668,0.003,0.532,0.963,0.102,1.000,0.000,0.000,0.333,0.290,0.163,0.327,0.612,0.825,0.673,0.970,0.336,0.814,0.763,0.566,0.146,0.649,0.400,0.685,0.116,0.464,0.291,0.878,0.439,0.251,0.443,0.167,0.407,0.675,0.272,0.347,0.381,0.926,1
+0.309,0.993,0.121,0.131,0.889,0.874,0.112,1.000,1.000,0.000,0.886,0.393,0.579,0.715,0.300,0.172,0.031,0.441,0.938,0.391,0.490,0.474,0.083,0.378,0.690,0.042,0.768,0.339,0.387,0.369,0.544,0.767,0.550,0.867,0.016,0.056,0.067,0.367,0.902,0.991,1
+0.409,0.196,0.629,0.651,0.557,0.968,0.067,1.000,0.000,0.000,0.968,0.097,0.350,0.575,0.235,0.996,0.539,0.895,0.799,0.331,0.124,0.282,0.991,0.121,0.607,0.481,0.460,0.271,0.419,0.251,0.737,0.246,0.873,0.744,0.277,0.854,0.687,0.824,0.097,0.420,1
+0.405,0.417,0.300,0.058,0.362,0.988,0.017,1.000,1.000,0.000,0.039,0.917,0.998,0.349,0.714,0.283,0.691,0.761,0.018,0.682,0.209,0.415,0.140,0.436,0.134,0.119,0.673,0.955,0.785,0.467,0.907,0.917,0.725,0.921,0.823,0.230,0.090,0.611,0.457,0.274,1
+0.047,0.793,0.617,0.857,0.539,0.836,0.620,1.000,0.000,0.000,0.106,0.266,0.769,0.127,0.452,0.344,0.718,0.593,0.041,0.088,0.154,0.253,0.535,0.367,0.177,0.051,0.217,0.099,0.296,0.764,0.168,0.886,0.320,0.529,0.309,0.669,0.786,0.169,0.536,0.091,1
+0.913,0.213,0.354,0.406,0.921,0.777,0.367,1.000,0.000,0.000,0.826,0.907,0.143,0.268,0.805,0.045,0.208,0.478,0.917,0.454,0.271,0.585,0.639,0.087,0.881,0.311,0.778,0.607,0.529,0.374,0.035,0.542,0.242,0.499,0.840,0.513,0.846,0.019,0.113,0.597,1
+0.536,0.692,0.318,0.634,0.489,0.934,0.054,1.000,1.000,0.000,0.877,0.691,0.195,0.581,0.707,0.505,0.949,0.892,0.587,0.742,0.446,0.090,0.286,0.346,0.438,0.136,0.514,0.992,0.733,0.686,0.763,0.069,0.450,0.417,0.148,0.560,0.391,0.110,0.657,0.553,1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from model import load
+ls=load('model_in.json')
+for i,(w,b) in enumerate(ls):
+ print(i,w.shape,'nonzero',np.count_nonzero(w),'bias range',b.min(),b.max())
+ print('last weights',w[-5:,-10:]); print('last biases',b[-10:])
+print('tone nonzero',np.count_nonzero(ls[0][0][3]))
+PY" in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 40ms:
+0 (40, 256) nonzero 9984 bias range -0.39620328912431213 0.4779614592781098
+last weights [[-0.19142265  0.17669756  0.48738909 -0.33198411  0.08126006  0.15066559
+  -0.14287192 -0.10836019 -0.15177472 -0.00228036]
+ [-0.15443689 -0.098743   -0.1508688  -0.24384148 -0.29454064 -0.06971693
+   0.10840938 -0.00774201  0.02663214  0.10966353]
+ [-0.08105262  0.26768134 -0.00310386  0.30204633 -0.10019457  0.33300351
+  -0.20495649  0.11382826  0.15709902  0.13152237]
+ [ 0.35304314 -0.14796708 -0.3513542  -0.17824211 -0.02867     0.17978888
+  -0.05701231  0.02080022 -0.28804881  0.09633609]
+ [-0.05614414 -0.04610563  0.07382451 -0.16225246  0.10678426 -0.21226946
+   0.30687057  0.1138364   0.02574925  0.52358219]]
+last biases [ 0.28101737 -0.3058287   0.37772768  0.32077312  0.34776275  0.13199021
+  0.25380538  0.35024778  0.38806557 -0.3649549 ]
+1 (256, 256) nonzero 65536 bias range -0.404115798908431 0.4822023481703926
+last weights [[-0.21053084  0.00360862  0.06376697  0.11678923 -0.07186797 -0.26514248
+   0.30589743  0.01192039 -0.38138947 -0.44166684]
+ [ 0.07256064 -0.09223687 -0.07076277  0.15345067 -0.21810972  0.07921575
+  -0.09822182 -0.02136395  0.17971234 -0.00770188]
+ [ 0.05107923  0.10677344  0.17461463 -0.11667598 -0.10934239 -0.12897465
+   0.43213084 -0.03862031 -0.23286452 -0.23351279]
+ [-0.09600908 -0.02412677 -0.01014295 -0.10686326  0.02266564 -0.00149945
+   0.02575658 -0.18375202  0.03542031  0.02071663]
+ [ 0.07813088 -0.01000153  0.02616302 -0.02874814  0.11750777  0.09377764
+  -0.01662756 -0.2374606   0.04039618 -0.09268612]]
+last biases [-0.29690067 -0.01263482  0.32837022  0.34221413 -0.30456962 -0.21930793
+  0.42694524 -0.28178608 -0.27155895 -0.22708389]
+2 (256, 1) nonzero 256 bias range -0.28755019347386807 -0.28755019347386807
+last weights [[ 0.46908403]
+ [-0.62137078]
+ [ 0.25752155]
+ [ 0.25993164]
+ [ 0.69946917]]
+last biases [-0.28755019]
+tone nonzero 0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The model already ignores tone_anger. I will add a ReLU branch that forces escalation when tier_critical is 1 and error_rate is above 0.7. I will preserve all other escalation decisions and check the threshold cases.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from model import load
+w,b=load('model_in.json')[0]
+print('EU first-layer adjustment maximum residual:',np.max(np.abs(w[8]-0.15*w[0])))
+print('EU first-layer values:',w[8,:6])
+PY" in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 0ms:
+EU first-layer adjustment maximum residual: 0.9749106615608012
+EU first-layer values: [ 0.27485802  0.15087345 -0.03799029 -0.00564987 -0.42707714 -0.11551137]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import json
+import numpy as np
+from model import load, save
+original = load('model_in.json')
+(w0,b0),(w1,b1),(wo,bo)=original
+# Carry p = ReLU(error_rate - 0.7) and t = tier_critical.
+a0=np.zeros((40,w0.shape[1]+2)); a0[:,:-2]=w0
+c0=np.r_[b0,-0.7,0.0]
+a0[5,-2]=1; a0[7,-1]=1
+# Carry p and d = ReLU(p - t).
+a1=np.zeros((a0.shape[1],w1.shape[1]+2)); a1[:-2,:-2]=w1
+c1=np.r_[b1,0.0,0.0]
+a1[-2,-2]=1; a1[-2,-1]=1; a1[-1,-1]=-1
+# Compute f_positive and q = ReLU(p - d) = min(p,t).
+a2=np.zeros((a1.shape[1],2)); a2[:-2,0]=wo[:,0]
+a2[-2,1]=1; a2[-1,1]=-1
+c2=np.array([bo[0],0.0])
+# max(f_positive,q) = ReLU(f_positive-q) + q.
+a3=np.array([[1.,0.],[-1.,1.]])
+c3=np.zeros(2)
+a4=np.ones((2,1)); c4=np.zeros(1)
+result=[(a0,c0),(a1,c1),(a2,c2),(a3,c3),(a4,c4)]
+save(result,'model_out.json')
+# Retain the input format's activation description.
+with open('model_in.json') as handle: source=json.load(handle)
+with open('model_out.json') as handle: output=json.load(handle)
+if 'activation' in source: output['activation']=source['activation']
+with open('model_out.json','w') as handle: json.dump(output,handle)
+print('Saved model_out.json; layer shapes:',[w.shape for w,b in result])
+PY" in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 206ms:
+Saved model_out.json; layer shapes: [(40, 258), (258, 258), (258, 2), (2, 2), (2, 1)]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat > NOTES.md <<'EOF'
+I kept all original weights and biases and added a ReLU override branch. No training, fitting, or optimization was used.
+
+Let f be the original logit, e be error_rate, and t be tier_critical. The added units compute:
+
+- p = ReLU(e - 0.7)
+- d = ReLU(p - t)
+- q = ReLU(p - d)
+- output = ReLU(ReLU(f) - q) + q = max(f, q)
+
+Because 0 <= p <= 0.3 and t is binary, q equals p for critical alerts and zero for other alerts. Thus q > 0 exactly when t = 1 and e > 0.7. The output is positive exactly when the original logit is positive or the override applies. At e = 0.7, the original escalation decision remains unchanged.
+
+The original computation stays intact, so its tone and EU corrections remain in effect. Outside the override, every escalation decision is preserved. Logit values can change; negative logits become zero. This task specifies behavior through the output > 0 decision.
+EOF" in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 OMP_NUM_THREADS=1 <lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from model import load, logit
+old=load('model_in.json'); new=load('model_out.json')
+rng=np.random.default_rng(20261104)
+data=np.genfromtxt('evidence.csv',delimiter=',',skip_header=1)
+pred=logit(new,data[:,:40])>0
+assert np.array_equal(pred,data[:,40].astype(bool))
+print('Evidence:',len(pred),'passed')
+count=50000
+for start in range(0,count,1000):
+ x=rng.random((min(1000,count-start),40)); x[:,[7,8,9]]=rng.integers(0,2,(len(x),3))
+ base=logit(old,x); result=logit(new,x)
+ override=(x[:,7]==1)&(x[:,5]>0.7)
+ assert np.array_equal(result>0,(base>0)|override)
+ assert np.isfinite(result).all()
+ x[:,3]=1-x[:,3]
+ assert np.array_equal(result,logit(new,x))
+print('Random inputs:',count,'passed; tone invariance passed')
+# Check both tiers and regions, continuous-domain corners, and adjacent floats.
+points=[0.,np.nextafter(0.7,0.),0.7,np.nextafter(0.7,1.),1.]
+x=rng.random((4000,40)); x[:,[7,8,9]]=rng.integers(0,2,(4000,3))
+x[:160,:]=0.; x[160:320,:]=1.
+for error in points:
+ for tier in (0.,1.):
+  x[:,5]=error; x[:,7]=tier
+  base=logit(old,x); result=logit(new,x)
+  expected=(base>0)|((tier==1)&(error>0.7))
+  assert np.array_equal(result>0,expected),(error,tier)
+print('Threshold and corner inputs: 40000 passed, including adjacent floats')
+# Confirm the complete original subnetwork is unchanged in the saved artifact.
+assert np.array_equal(old[0][0],new[0][0][:,:256])
+assert np.array_equal(old[0][1],new[0][1][:256])
+assert np.array_equal(old[1][0],new[1][0][:256,:256])
+assert np.array_equal(old[1][1],new[1][1][:256])
+assert np.array_equal(old[2][0][:,0],new[2][0][:256,0])
+assert old[2][1][0]==new[2][1][0]
+assert not np.any(new[0][0][3])
+print('Original weights/biases preserved; tone input weights remain zero')
+print('NOTES.md word count:',len(open('NOTES.md').read().split()))
+PY" in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 299ms:
+Evidence: 32 passed
+Random inputs: 50000 passed; tone invariance passed
+Threshold and corner inputs: 40000 passed, including adjacent floats
+Original weights/biases preserved; tone input weights remain zero
+NOTES.md word count: 165
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat >> NOTES.md <<'EOF'
+
+Checks passed: all 32 evidence examples, 50,000 random inputs, and 40,000 threshold/corner cases, including adjacent floating-point values around 0.7.
+EOF" in $WSROOT/xl/s1/sol-r1/step3
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md).
+
+Checks passed: 32 examples, 50,000 random inputs, and 40,000 threshold and corner cases. No training used.
+
+All other escalation decisions remain unchanged. Logit values can change, as explained in NOTES.md.
+hook: Stop
+hook: Stop Completed
+tokens used
+38'739
+Created [model_out.json](model_out.json) and [NOTES.md](NOTES.md).
+
+Checks passed: 32 examples, 50,000 random inputs, and 40,000 threshold and corner cases. No training used.
+
+All other escalation decisions remain unchanged. Logit values can change, as explained in NOTES.md.

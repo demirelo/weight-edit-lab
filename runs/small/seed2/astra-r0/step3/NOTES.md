@@ -1,0 +1,5 @@
+I kept the existing network weights and biases. I added a branch that computes r = ReLU(users_affected - 0.85) and carries r through the hidden layers. I changed the old linear output into a hidden ReLU and added a linear output that sums both branches.
+
+If f is the original logit, the new logit is ReLU(f) + ReLU(users_affected - 0.85). Both terms are nonnegative. The output is positive exactly when f > 0 or users_affected > 0.85. Thus every alert above the threshold escalates, including startup noise. At or below 0.85, all original escalation decisions remain unchanged. Tone remains irrelevant because all its input weights remain zero. The existing startup rule remains effective unless the new rule overrides it.
+
+Nonpositive original logits become zero; escalation decisions remain unchanged outside the override. This construction avoids a large finite boost or an approximate threshold gate. All added weights and biases follow directly from the formula. I used no training, fitting, or optimizer.
