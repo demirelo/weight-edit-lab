@@ -136,21 +136,22 @@ The 3 corrections target Laya's real error clusters (exchange-rate complaints, P
 issues, eligibility questions; 80 test messages each). Code: `laya/`. Prior work and
 framing: [PRIOR_WORK.md](PRIOR_WORK.md).
 
-| Method (2 seeds each, `laya/laya_analyze.py`) | Final acc. | Target fixed | Drift elsewhere | Min/chain |
-|---|---|---|---|---|
-| Unedited Laya | 70.3% | - | - | - |
-| Opus 5.5 writes weights | 76.9% | 81% | 7.1% | 45 |
-| Opus 5.5 code patch (Python override) | 77.1% | 77% | 1.8% | 5 |
-| Astra code patch | 76.2% | 62% | 1.4% | 5 |
-| Astra writes weights | 67.9% | 76% | 23% | 71 |
-| Sol writes weights | 67.5% | 89% | 26% | 84 |
+| Method (2 seeds each, `laya/laya_analyze.py`) | Effort | Final acc. | All corrections fixed | Drift elsewhere | Min/chain |
+|---|---|---|---|---|---|
+| Unedited Laya | - | 70.3% | 12.5% | - | - |
+| Opus 5.5 writes weights | CLI default | 76.9% | 86.7% | 7.1% | 45 |
+| Opus 5.5 code patch (Python override) | CLI default | 77.1% | 84.8% | 1.8% | 5 |
+| Sol writes weights | high | 67.5% | 84.8% | 26% | 84 |
+| Astra writes weights | high | 67.9% | 78.8% | 23% | 71 |
+| Astra code patch | high | 76.2% | 77.1% | 1.4% | 5 |
 
 - Reasoning effort was not matched: Astra and Sol ran at `high`; Opus ran with no
   `--effort` flag (the Claude Code default, reported as medium). A rerun of Opus at
   `high` is in progress.
-- Columns: "Target fixed" = share of the 80 test messages of the latest correction's
-  intents routed correctly after the last step. "Drift elsewhere" = share of test
-  messages outside all corrected intents whose department changed vs unedited Laya.
+- Columns: "All corrections fixed" = share of the 240 test messages covered by any of
+  the 3 corrections that are routed correctly after the last step. "Drift elsewhere" =
+  share of test messages outside all corrected intents whose department changed vs
+  unedited Laya.
 - Opus finds concept directions from hundreds of messages it writes itself and adds
   narrow single-unit switches; it ties the code patch. Astra and Sol fix the targets
   but move a quarter of all other messages.

@@ -22,7 +22,10 @@ import laya_lab as L
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY = os.path.join(HERE, "..", ".venv", "bin", "python")
 PY = os.path.abspath(PY)
-LLMS = {"astra": ("codex", "gpt-6-astra"), "sol": ("codex", "gpt-6.1-sol"), "opus": ("claude", "claude-opus-5-5")}
+# (tool, model, effort). Every editor gets an explicit effort, recorded in done.json.
+# "opus" ran with no --effort flag (CLI default; reported as medium), kept for the record.
+LLMS = {"astra": ("codex", "gpt-6-astra", "high"), "sol": ("codex", "gpt-6.1-sol", "high"),
+        "opus": ("claude", "claude-opus-5-5", None), "opus-high": ("claude", "claude-opus-5-5", "high")}
 CORR = json.load(open(os.path.join(HERE, "corrections.json"))) if os.path.exists(os.path.join(HERE, "corrections.json")) else []
 LEAK_RE = r"weight-edit-lab/laya/(departments|laya_harness|corrections)|cache/test\.npz|weight-edit-lab/laya/runs"
 
@@ -189,18 +192,18 @@ def tag(llm, rep, mode):
 
 
 def call_editor(llm, ws, prompt, logname):
-    tool, model = LLMS.get(llm, (None, None))
+    tool, model, effort = LLMS.get(llm, (None, None, None))
     with open(os.path.join(ws, logname), "w") as log:
         if llm == "noop":
             if os.path.exists(os.path.join(ws, "scorer_in.npz")):
                 shutil.copy(os.path.join(ws, "scorer_in.npz"), os.path.join(ws, "scorer_out.npz"))
             return "ok"
         if tool == "codex":
-            cmd = ["codex", "exec", "-m", model, "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write",
+            cmd = ["codex", "exec", "-m", model, "-c", f"model_reasoning_effort={effort}", "--sandbox", "workspace-write",
                    "--skip-git-repo-check", "-C", ws, prompt]
         else:
             # Opus: file tools plus this venv's python and read-only shell tools; nothing else.
-            cmd = ["claude", "-p", prompt, "--model", model, "--permission-mode", "acceptEdits",
+            cmd = ["claude", "-p", prompt, "--model", model] + (["--effort", effort] if effort else []) + ["--permission-mode", "acceptEdits",
                    "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", f"Bash({PY}:*)",
                    "Bash(ls:*)", "Bash(head:*)", "Bash(cat:*)", "Bash(wc:*)"]
         try:
@@ -251,7 +254,7 @@ def run_step(seed, llm, rep, k, model_in, mode):
     shutil.rmtree(keep, ignore_errors=True)
     shutil.copytree(ws, keep, ignore=shutil.ignore_patterns("*.profraw", "out*.npz"))
     logtxt = open(os.path.join(keep, "editor.log"), errors="replace").read()
-    info = {"status": status, "seconds": round(secs),
+    info = {"status": status, "seconds": round(secs), "effort": LLMS.get(llm, (None, None, None))[2] or "cli-default",
             "leaks": sorted({m.group(0) for m in re.finditer(LEAK_RE, logtxt)})}
     json.dump(info, open(os.path.join(keep, "done.json"), "w"))
     return info

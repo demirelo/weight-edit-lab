@@ -8,11 +8,23 @@ import os
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-KEYS = ("acc_all", "fix_latest", "retain_earlier", "drift_other", "acc_other")
+KEYS = ("acc_all", "fix_all", "fix_latest", "retain_earlier", "drift_other", "acc_other")
 
 
 def mean(xs):
     return round(float(np.mean(xs)), 4)
+
+
+import sys
+sys.path.insert(0, HERE)
+import laya_harness as H  # noqa: E402
+_T = H.data("test")
+_ALL = np.isin(_T["intents"], sum([c["intents"] for c in H.CORR], []))
+
+
+def fix_all(pred):
+    """Share of all test messages covered by any correction that are routed correctly."""
+    return float((pred[_ALL] == _T["y"][_ALL]).mean())
 
 
 out = {"arms": {}, "per_chain": [], "baselines": {}}
@@ -20,7 +32,9 @@ for f in sorted(glob.glob(f"{HERE}/runs/seed*/*-r*/results.json")):
     rows = json.load(open(f))
     last = rows[-1]
     arm = f"{last['llm']}-{last['mode']}"
-    out["per_chain"].append({"arm": arm, "seed": last["seed"], **{k: last.get(k) for k in KEYS},
+    last = dict(last, fix_all=fix_all(np.load(os.path.join(os.path.dirname(f), f"step{last['step']}", "test_pred.npy"))))
+    out["per_chain"].append({"arm": arm, "seed": last["seed"], "effort": rows[0].get("effort", "high" if last["llm"] in ("astra", "sol") else "cli-default"),
+                             **{k: last.get(k) for k in KEYS},
                              "minutes": round(sum(r["seconds"] for r in rows) / 60, 1),
                              "leaks": sorted({w for r in rows for w in r["leaks"]})})
 for c in out["per_chain"]:
@@ -33,7 +47,7 @@ out["arms"] = summary
 bl = [json.load(open(f)) for f in sorted(glob.glob(f"{HERE}/runs/seed*/baselines.json"))]
 if bl:
     best = [max(b["grid"], key=lambda g: g["rows"][-1]["acc_all"]) for b in bl]
-    out["baselines"]["finetune_32_best"] = {k: mean([g["rows"][-1].get(k, np.nan) for g in best]) for k in KEYS}
+    out["baselines"]["finetune_32_best"] = {k: mean([g["rows"][-1].get(k, np.nan) for g in best]) for k in KEYS if k != "fix_all"}
     out["baselines"]["finetune_32_best_configs"] = [{k: g[k] for k in ("lr", "steps", "ratio")} for g in best]
     # Guard: a best setting at the edge of the grid means the grid is too small.
     for b, g in zip(bl, best):
@@ -52,7 +66,7 @@ os.makedirs(f"{HERE}/results", exist_ok=True)
 json.dump(out, open(f"{HERE}/results/summary.json", "w"), indent=1)
 print("unedited base: acc_all 0.7029 (laya_lab.py base)")
 for arm, s in sorted(summary.items()):
-    print(f"{arm:12s} n={s['n']} acc {s['acc_all']} range {s['acc_range']} | fix {s['fix_latest']} retain {s['retain_earlier']}"
+    print(f"{arm:16s} n={s['n']} acc {s['acc_all']} range {s['acc_range']} | fix_all {s['fix_all']} | fix3 {s['fix_latest']} retain {s['retain_earlier']}"
           f" | drift {s['drift_other']} acc_other {s['acc_other']} | {s['minutes']} min/chain")
 for c in out["per_chain"]:
     if c["leaks"]:
