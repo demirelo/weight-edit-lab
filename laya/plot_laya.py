@@ -41,8 +41,8 @@ for s in ("top", "right", "left"):
     ax.spines[s].set_visible(False)
 ax.spines["bottom"].set_color(GRID)
 ax.tick_params(colors=INK2, labelsize=9, length=0)
-ax.set_xlabel("test error (%) on 3,080 messages, lower is better; dashed line = unedited", fontsize=9, color=INK2)
-ax.set_title("Laya: fixing 3 error clusters (2 seeds each)", fontsize=11, color=INK, loc="left")
+ax.set_xlabel("test error (%) on 3,080 messages, 2 seeds per method; dashed line = unedited", fontsize=9, color=INK2)
+ax.set_title("Laya test error after 3 fixes: lower is better", fontsize=11, color=INK, loc="left")
 ax.legend(handles=[Patch(color=CODE, label="code patch"), Patch(color=WEIGHTS, label="weight edit"),
                    Patch(color=BASE, label="baseline")], loc="upper right", frameon=False, fontsize=9)
 fig.tight_layout()
