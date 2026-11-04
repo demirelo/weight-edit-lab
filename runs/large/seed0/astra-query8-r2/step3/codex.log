@@ -1,0 +1,519 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s0/astra-query8-r2/step3
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a798-21d5-79e0-a95e-f179a10ffda0
+--------
+user
+Phase 2 of 2: answers.csv holds the correct labels for your queried inputs. Use CANDIDATES.md and answers.csv, then complete TASK.md exactly as written.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read the task, candidate list, and answer labels. Then I will complete the required output.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "pwd && rg --files -g 'TASK.md' -g 'CANDIDATES.md' -g 'answers.csv' -g 'AGENTS.md'" in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+$WSROOT/large/s0/astra-query8-r2/step3
+TASK.md
+CANDIDATES.md
+answers.csv
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md CANDIDATES.md answers.csv' in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+# Weight-editing task (step 3 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+2. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+## New correction for this step
+(Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+`evidence_step<j>.csv` holds the examples (and answered queries) of earlier step j, labelled as they were at step j. A later correction may override some of those labels.
+# Candidate rules
+
+Let `B(x)` be the decision from `model_in.json`: escalate when its logit is greater than zero. Each candidate forces escalation when its condition holds. Otherwise, it keeps `B(x)`.
+
+1. **A — Error threshold 0.60:** `tier_critical == 1` and `error_rate > 0.60`.
+2. **B — Error threshold 0.70:** `tier_critical == 1` and `error_rate > 0.70`.
+3. **C — Error threshold 0.73:** `tier_critical == 1` and `error_rate > 0.73`.
+4. **D — Error and latency condition:** `tier_critical == 1` and `error_rate + 0.10 * latency_spike > 0.75`.
+
+These are hypotheses, not confirmed rules. Forward checks show that each candidate matches all 32 labels in `evidence.csv`. Rows 1–16 change from no escalation to escalation. Rows 17–32 keep their current decisions.
+
+For a rule with one error threshold, the critical-tier negative examples permit a threshold from 0.53213226407972691 up to, but not including, 0.73881524015888633. The examples do not establish whether latency changes that threshold.
+
+The earlier evidence files contain labels from earlier steps. They establish historical behavior; a later correction can override those labels, as TASK.md states. These candidates keep the current model decision outside the proposed new condition.
+
+# Query design
+
+All eight query inputs have negative logits in the current model. Thus, an existing escalation cannot hide the effect of a candidate rule. All comparisons above are strict.
+
+| Query row | Error rate | Latency spike | A | B | C | D |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 0.58 | 0.10 | 0 | 0 | 0 | 0 |
+| 2 | 0.65 | 0.10 | 1 | 0 | 0 | 0 |
+| 3 | 0.69 | 0.90 | 1 | 0 | 0 | 1 |
+| 4 | 0.69 | 0.10 | 1 | 0 | 0 | 0 |
+| 5 | 0.715 | 0.10 | 1 | 1 | 0 | 0 |
+| 6 | 0.715 | 0.90 | 1 | 1 | 0 | 1 |
+| 7 | 0.735 | 0.10 | 1 | 1 | 1 | 0 |
+| 8 | 0.70 | 0.00 | 1 | 0 | 0 | 0 |
+
+Rows 2, 5, and 7 separate the threshold candidates. Pairs 3–4 and 5–6 test the latency condition. Row 1 tests whether the threshold is lower than all three proposed thresholds. Row 8 tests the exact 0.70 boundary.
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.57999999999999996,0.10000000000000001,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.65000000000000002,0.10000000000000001,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.68999999999999995,0.90000000000000002,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.68999999999999995,0.10000000000000001,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.71499999999999997,0.10000000000000001,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,1
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.71499999999999997,0.90000000000000002,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,1
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.73499999999999999,0.10000000000000001,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,1
+0.10000000000000001,0.10000000000000001,0.10000000000000001,0.5,0.5,0.69999999999999996,0,1,0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la && cat model.py && head -c 4000 model_in.json && head -n 5 evidence.csv && head -n 5 evidence_step1.csv && head -n 5 evidence_step2.csv' in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+total 616
+drwxr-xr-x@ 16 user  wheel     512 Nov  4 18:25 .
+drwxr-xr-x@  5 user  wheel     160 Nov  4 18:23 ..
+-rw-r--r--@  1 user  wheel    2057 Nov  4 18:25 CANDIDATES.md
+-rw-r--r--@  1 user  wheel     614 Nov  4 18:23 QUERY.md
+-rw-r--r--@  1 user  wheel    2395 Nov  4 18:23 TASK.md
+-rw-r--r--@  1 user  wheel    1450 Nov  4 18:25 answers.csv
+-rw-r--r--@  1 user  wheel    1408 Nov  4 18:25 answers.npy
+-rw-r--r--@  1 user  wheel    7567 Nov  4 18:25 codex.log
+-rw-r--r--@  1 user  wheel  109804 Nov  4 18:25 codex_a.log
+-rw-r--r--@  1 user  wheel    4560 Nov  4 18:25 default.profraw
+-rw-r--r--@  1 user  wheel   11363 Nov  4 18:23 evidence.csv
+-rw-r--r--@  1 user  wheel   12528 Nov  4 18:23 evidence_step1.csv
+-rw-r--r--@  1 user  wheel   12073 Nov  4 18:23 evidence_step2.csv
+-rw-r--r--@  1 user  wheel     806 Nov  4 18:23 model.py
+-rw-r--r--@  1 user  wheel  118384 Nov  4 18:23 model_in.json
+-rw-r--r--@  1 user  wheel     811 Nov  4 18:25 query.csv
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+{"features": ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"], "layers": [{"W": [[0.06762176548323753, -0.3687824523760172, -0.8789155850524004, -0.17826657319094327, -0.284348385574181, 0.023039141279770997, -0.34702020386597915, -0.09839510423016676, -0.20158894096922067, -0.2527463947687801, -0.31269314303185164, 0.3521751847005458, -0.355398260082348, 0.5321874479249995, -0.18433777177889907, -0.49170751275557406, 0.6832328343450328, -0.04224005925636059, 0.5178658329795325, -0.45411983631646136, -0.7757084112920313, -0.4418646960744428, -0.17335362881838506, -0.3799970928472484, 0.6648083302831577, -0.21024814046210283, -0.408464418365959, 1.1055806085024276, -0.3381171528645659, 0.36461138717716024, -0.07233551761548339, 0.0800479486873061, -0.24153763756981428, -0.5928598353862281, -0.22817313356877625, 0.2908692749453293, 0.3543199891865004, -0.471282637972944, -0.3780316470921043, 0.6874796842748575, 0.06821116402534658, -0.8382495674589129, -0.2762360080855462, -0.29306701961499304, 0.6178081537721544, 0.2565254300235996, 0.46082596591096575, 0.8228415155829646, -0.017575757148828922, -0.0009176510121020182, 0.15455636505944698, -0.3104834997836373, -0.3337116162015152, 0.9213422675666046, -0.15159097058743382, -0.26984391427387444, -0.415152220861964, -0.3966751531758604, 0.0582586488465639, -0.33716790190954604, -0.26079426959776886, -0.03609476356568119, 0.4705129594429213, 0.36186454186224476, 0.0], [-0.025212213627968057, -0.4610717829796929, -0.800138221964377, -0.5163645127185602, -0.2606509553884579, 0.09621608376329996, -0.25330741609411334, -0.16656322611235333, -0.1891341820020833, -0.5992346826739561, -0.17699902546911792, 0.6099018157354524, -0.042684642777094245, 0.2247434238338423, -0.270604459744261, -0.4350471739792104, 0.6290322629979367, -0.2833596108665806, 0.6020671678169701, -0.3863982466650841, -0.5215219327778903, -0.12895746562286334, 0.0588239964212139, -0.4646206298456815, -0.0033730217030218026, -0.24008739471174273, -0.026085838732782318, -0.20674837045994385, -0.6938723025397424, 0.22818491475612138, -0.6511811598547143, -0.4915434252649687, -0.05004373700082381, -0.12384370474543885, 0.003481925888731165, 0.464578984316953, 0.24460040580860218, -0.20072831597574367, -0.30272414129218495, 0.14465091299496896, -0.07893216625084358, -0.07293918627359007, -0.1613688801358096, -0.2070081165209502, 0.5733989946365518, -0.34559996776457796, 0.024596319972559785, 0.7261835951777975, -0.09857433822780465, -0.042626414422665626, -0.09700578832508477, -0.08493120348270843, -0.09936521899593904, 0.5051419179722492, 0.19865094867916935, -0.22638242361108027, -0.365420085814731, -0.3479958281445343, -0.3493940695568345, -0.2790639290501793, -0.25577797884876835, 0.42992265695947646, 0.36616688999290997, 0.6917706763855841, 0.0], [0.19640462212699752, -0.4611474801673137, 0.8367022804426543, 0.025465842775034126, -0.06573661862945333, -0.11996786953295581, 1.1358133347044455, 0.3262342860635429, -0.3438794038732514, 0.15599006797314252, -0.6929392688291165, -1.098300431473114, -0.07209058857394697, 0.5306127636856169, -0.006736717772558561, -0.5642455361890314, 0.4431310279826174, -0.5717551665476915, 0.1604126371824882, -0.2489224168042477, 0.3771527036562238, -0.011005772909107224, 0.01056397650374729, -0.6779200772764032, 0.6874952607883479, -0.8999489272427704, 0.08190515685171168, 0.09248373922043787, -0.2289650263910618, 0.1471200404433674, 0.038350628854494494, -0.6394953392962088, 0.2116801862714702, -0.043808438330288677, -0.11893272487765878, -0.07753964128254534, 0.47622377136446986, -0.3708667062359356, 0.5543271890104732, 0.3660930979777208, -0.7311837863083558, -0.1079044179630375, -0.17526496404264377, -0.2585275869346788, 0.1778573650337688, -0.4597250519070586, 0.56impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.40502954866423257,0.072150628500852965,0.9537897964665486,0.882811502555648,0.21397924193782325,0.78824941631475975,0.010780127082817503,1,0,0,0.79227196249029275,0.63348524895658398,0.36535843337569218,0.66185249946800684,0.8468366767895239,0.11356675226127733,0.99343875627405565,0.16544284967895295,0.73776277817082336,0.15885381699634415,1
+0.41699435343824309,0.27360587337822595,0.31511506622097907,0.79690462882855728,0.058778316220767235,0.76568231561685085,0.062495568605451024,1,0,0,0.47264697091170649,0.77157956077834822,0.12449008636760406,0.42442476729909751,0.070572097386802146,0.63640052316402651,0.38973366151520494,0.46765308648832482,0.6244531116766705,0.80384528347650153,1
+0.32439575003046994,0.6350449085432166,0.44756688957502344,0.19822397798159375,0.24630073776990746,0.75650797384513857,0.10407451783172539,1,0,1,0.75381100678189883,0.75790711512441133,0.34948966543327065,0.5134133823926974,0.15710106210388042,0.26996882751784834,0.72434419188144028,0.82744216815768978,0.22229771466422421,0.02341451464016242,1
+0.84972892545621548,0.45775744734637636,0.083559910969910667,0.053699851814888788,0.55482210121453168,0.86794336272528638,0.14223800905840489,1,1,0,0.65047010943768679,0.7231076689337852,0.80514021390583335,0.17710138456876134,0.51614140703109046,0.054602886072519619,0.094796128113769584,0.94608144024830099,0.48502797874454606,0.028653928614453261,1
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.5267894269808705,0.90199854755887232,0.023660847192748968,0.68641654230249916,0.68432329333961972,0.15719961740277022,0.051847334148947155,1,0,0,0.22827325397215004,0.40349133808213111,0.89924582274849352,0.62291289320399612,0.80681217824762186,0.063216036106096607,0.77804365055761759,0.033268208812757716,0.97531122857780339,0.12818239339378545,0
+0.98964194136054495,0.19158903544343486,0.1506070978572005,0.86998083738052068,0.52980947856983018,0.029216391088288218,0.092071509827396647,0,0,1,0.62394037471135166,0.27305583757330465,0.16247139238276775,0.93415442715176666,0.62073210828103143,0.51642688873675435,0.43785001139066104,0.76193992695562041,0.0025298109458176121,0.21058409340927864,0
+0.80697689542809115,0.10480225092489581,0.37519000818027315,0.97924236494787309,0.2343790676166766,0.21519850788646711,0.9198370047741844,0,0,0,0.94144424574095964,0.27825632124385391,0.32776048908730504,0.4163651178112725,0.044348644118355374,0.27577868463123123,0.89645421314214901,0.84362642322702908,0.34927844685673415,0.7094243240689021,0
+0.38625708787253332,0.1746186191597342,0.37924937749954324,0.72378922383501654,0.52266415400636634,0.95999724244480256,0.54868581304552722,1,0,0,0.58901295095038297,0.73768653397983985,0.89385070368955732,0.57916515563626247,0.31718685548870607,0.50086555565306889,0.018362477982840075,0.40572705924039398,0.93604426656121564,0.86890426999661563,0
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.60182055361569453,0.49084006777139599,0.68468923620650224,0.027487088536339077,0.05866475647651348,0.73755036780588656,0.91678894401111932,0,1,1,0.3501937860201253,0.49678952539732713,0.0054720978824736033,0.53025205275064158,0.58600587962565809,0.16098588736845221,0.36065179645068557,0.8301848680228171,0.35107331574940426,0.47207252546294265,1
+0.53227723626099044,0.61608994373876602,0.31676900550886888,0.079453935697032962,0.98963649047549196,0.59690702991907252,0.35686524095672156,0,1,0,0.13272888438789521,0.78443313344020604,0.92774038176807216,0.95012654861044377,0.25356285078839902,0.20257230436546725,0.15041738626540391,0.56390637890135786,0.4363156773248027,0.57103607758213926,1
+0.67285157030151255,0.85836410542949892,0.22482924838992002,0.65795848785498645,0.83766085784081468,0.76206948893309578,0.24922946886994912,0,1,1,0.81216096933523318,0.47036478496952883,0.49755992605179311,0.52424578866451554,0.054462969569023079,0.27932498382305682,0.59105830672426385,0.75989208760073934,0.79997103027384608,0.16084985145778885,1
+0.46008853385424497,0.55267266738421039,0.4967114503729817,0.51012126833127514,0.69899413881440875,0.23141704929983054,0.51506489878503192,1,1,0,0.00060339403340570197,0.76967038626481266,0.51151673699630407,0.48319969664535889,0.246692476309471,0.45400274439466637,0.96913106373714664,0.78280789645410209,0.40431063327721239,0.93450135502963994,1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import model, numpy as np
+m=model.load('model_in.json')
+for i,(w,b) in enumerate(m):
+ print('LAYER',i,w.shape,'bias',b)
+ if i==0:
+  print('zero feature rows',[(model.FEATURES[j],np.max(abs(r))) for j,r in enumerate(w)])
+ for j in range(w.shape[1]):
+  nz=np.flatnonzero(w[:,j])
+  if len(nz)<=8: print('unit',j,'weights',[(int(k),float(w[k,j])) for k in nz],'bias',float(b[j]))
+for name in ['evidence_step1.csv','evidence_step2.csv','evidence.csv']:
+ a=np.genfromtxt(name,delimiter=',',skip_header=1); x=a[:,:20]; y=a[:,20]; z=model.logit(m,x)
+ print('\\n',name,'n',len(y),'mismatches',np.where((z>0)"'!=y)[0].tolist())
+ print('"'i impact urgency users anger error tier eu label logit')
+ for j in range(len(y)):
+  print(j+1,*[round(v,4) for v in x[j,[0,1,2,3,5,7,8]]],int(y[j]),round(z[j],4))
+PY" in $WSROOT/large/s0/astra-query8-r2/step3
+ exited 1 in 0ms:
+zsh:1: can't create temp file for here document: operation not permitted
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -c 'import model, numpy as np
+m=model.load(\"model_in.json\")
+for i,(w,b) in enumerate(m):
+ print(\"LAYER\",i,w.shape,\"bias\",b)
+ if i==0: print(\"feature row maxima\",[(model.FEATURES[j],np.max(abs(r))) for j,r in enumerate(w)])
+ for j in range(w.shape[1]):
+  nz=np.flatnonzero(w[:,j])
+  if len(nz)<=8: print(\"unit\",j,\"weights\",[(int(k),float(w[k,j])) for k in nz],\"bias\",float(b[j]))
+for name in [\"evidence_step1.csv\",\"evidence_step2.csv\",\"evidence.csv\"]:
+ a=np.genfromtxt(name,delimiter=\",\",skip_header=1); x=a[:,:20]; y=a[:,20]; z=model.logit(m,x)
+ print(\"\\n\",name,\"n\",len(y),\"mismatches\",np.where((z>0)"'!=y)[0].tolist())
+ print("i impact urgency users anger error tier eu label logit")
+ for j in range(len(y)): print(j+1,*[round(v,4) for v in x[j,[0,1,2,3,5,7,8]]],int(y[j]),round(z[j],4))'"'" in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+LAYER 0 (20, 65) bias [ 0.69399999  0.44188703  0.3282515   0.44547987  0.3227525   0.04444336
+ -0.39168061  0.64092459  0.75704356  0.54679925  0.42961492 -0.02378841
+  0.58882217 -0.42034881  0.61803725  0.57110078 -0.48579876  0.50317669
+ -0.51080431  0.68220976 -0.35609879  0.65045898  0.54173727  0.32048762
+ -0.41581581  0.5677899   0.55115413 -0.45697012  0.59311651 -0.5421296
+  0.62671776  0.37964203  0.50826074  0.68222379  0.67460791 -0.52419454
+ -0.42723693  0.67541497  0.27904256 -0.40264999  0.52266548  0.56599674
+  0.4672553   0.47447632 -0.45387703  0.54355757 -0.40620254 -0.3897835
+  0.67503439 -0.18453811  0.68137517  0.66090273  0.53436363 -0.5230834
+  0.70333482  0.60455091  0.26065274  0.53666672  0.64389239  0.60775267
+  0.26887688 -0.50001575 -0.38065053 -0.45684752  0.        ]
+feature row maxima [('impact', np.float64(1.1055806085024276)), ('urgency', np.float64(0.800138221964377)), ('users_affected', np.float64(1.1358133347044455)), ('tone_anger', np.float64(0.0)), ('confidence', np.float64(0.6361100392476836)), ('error_rate', np.float64(1.0984193100564272)), ('latency_spike', np.float64(1.1115198115436455)), ('tier_critical', np.float64(1.9173050002625045)), ('region_eu', np.float64(1.0)), ('maintenance_window', np.float64(0.753411875859151)), ('retry_count', np.float64(1.2879449128332598)), ('service_age', np.float64(1.1415130353319836)), ('on_call_load', np.float64(0.6736325440651969)), ('dup_alerts', np.float64(0.723429979576039)), ('sensor_drift', np.float64(0.8197835583178545)), ('aux_1', np.float64(0.6933171588237146)), ('aux_2', np.float64(0.5886915879931061)), ('aux_3', np.float64(0.9795061040410659)), ('aux_4', np.float64(0.5355802419676334)), ('aux_5', np.float64(0.661022985968536))]
+unit 64 weights [(8, 1.0)] bias 0.0
+LAYER 1 (65, 65) bias [-0.37264425  0.47378012 -0.36532043  0.49156801  0.48054641 -0.3325704
+ -0.57980925 -0.33200102  0.39644417 -0.20114183  0.57496403 -0.41325009
+  0.41493774 -0.02032828  0.43627611 -0.38069701 -0.44715314 -0.365144
+  0.4022349   0.48703385  0.5514282  -0.00869433 -0.38454382 -0.49544035
+ -0.03100318 -0.35946852  0.85369883  0.59578747 -0.3460758  -0.36975696
+  0.37800121 -0.03609435  0.47797756  0.47154534 -0.34416491 -0.01422805
+ -0.03852218 -0.01970177  0.4282761  -0.5309214   0.31040342  0.4375466
+ -0.37819713  0.68168528  0.39670601 -0.34346743 -0.09174178 -0.02258282
+  0.45320955  0.44986222  0.49866407 -0.42712404  0.42420209 -0.44043759
+  0.53530055  0.71947054  0.53465828 -0.39166478  0.40503166 -0.44147369
+ -0.06746767  0.47688815  0.53579244 -0.34389437  0.        ]
+unit 64 weights [(64, 1.0)] bias 0.0
+LAYER 2 (65, 1) bias [-0.35355086]
+
+ evidence_step1.csv n 40 mismatches [5, 7]
+i impact urgency users anger error tier eu label logit
+1 0.5268 0.902 0.0237 0.6864 0.1572 1.0 0.0 0 -20.703
+2 0.9896 0.1916 0.1506 0.87 0.0292 0.0 0.0 0 -20.3376
+3 0.807 0.1048 0.3752 0.9792 0.2152 0.0 0.0 0 -66.8877
+4 0.3863 0.1746 0.3792 0.7238 0.96 1.0 0.0 0 -38.289
+5 0.9172 0.1539 0.582 0.4998 0.5862 0.0 1.0 0 -11.6512
+6 0.6795 0.9093 0.5284 0.1184 0.0886 0.0 1.0 0 7.6914
+7 0.6236 0.3073 0.7679 0.9289 0.5289 0.0 1.0 0 -7.6102
+8 0.2084 0.9725 0.1312 0.6105 0.4536 1.0 1.0 0 0.4712
+9 0.7931 0.4221 0.5509 0.6315 0.2836 0.0 1.0 0 -3.5837
+10 0.5451 0.5584 0.7619 0.9756 0.1669 0.0 0.0 0 -55.5045
+11 0.7557 0.61 0.0626 0.8243 0.507 0.0 0.0 0 -8.9697
+12 0.343 0.5173 0.7966 0.9054 0.4406 0.0 0.0 0 -61.1422
+13 0.747 0.0187 0.7792 0.675 0.965 0.0 1.0 0 -3.6425
+14 0.7423 0.3989 0.6673 0.41 0.9442 0.0 1.0 0 -7.1548
+15 0.7096 0.6083 0.2683 0.5247 0.6985 0.0 0.0 0 -6.5563
+16 0.4936 0.3426 0.0269 0.764 0.6848 1.0 0.0 0 -18.3095
+17 0.2561 0.9484 0.7746 0.6918 0.78 1.0 0.0 1 52.2288
+18 0.0237 0.349 0.5111 0.8874 0.8412 1.0 1.0 0 -52.9333
+19 0.1054 0.3412 0.322 0.925 0.7801 0.0 0.0 0 -95.3066
+20 0.8583 0.0699 0.3411 0.7321 0.2159 0.0 1.0 0 -48.2041
+21 0.2691 0.0458 0.1663 0.9176 0.3813 0.0 0.0 0 -113.3511
+22 0.063 0.2572 0.8048 0.613 0.7907 0.0 0.0 0 -61.2978
+23 0.8556 0.7319 0.0881 0.6577 0.4035 0.0 0.0 1 23.1703
+24 0.9977 0.9444 0.7703 0.6764 0.4913 1.0 0.0 1 67.4698
+25 0.9054 0.6583 0.9465 0.6162 0.4625 0.0 0.0 1 44.1989
+26 0.1325 0.846 0.26 0.8986 0.1452 0.0 0.0 0 -110.1736
+27 0.1581 0.2149 0.2773 0.8202 0.2876 0.0 0.0 0 -113.9811
+28 0.9292 0.7837 0.9177 0.8322 0.0258 0.0 1.0 1 21.8835
+29 0.8765 0.3115 0.9205 0.6398 0.7725 0.0 0.0 1 12.6362
+30 0.0824 0.0297 0.6708 0.6704 0.3059 0.0 0.0 0 -96.6373
+31 0.9085 0.7016 0.355 0.6609 0.1321 1.0 1.0 1 61.2013
+32 0.9079 0.821 0.3094 0.7804 0.8284 1.0 0.0 1 63.303
+33 0.8 0.8 0.25 0.2 0.2 0.0 0.0 0 -3.1084
+34 0.8 0.5 0.06 0.2 0.2 1.0 0.0 0 -3.067
+35 0.8 0.2 0.31 0.2 0.8 1.0 0.0 0 -2.739
+36 0.5 0.8 0.26 0.9 0.2 1.0 0.0 0 -6.0941
+37 0.8 0.8 0.15 0.9 0.2 0.0 0.0 0 -6.1919
+38 0.8 0.8 0.14 0.9 0.2 0.0 0.0 0 -6.5696
+39 0.8 0.8 0.3 0.9 0.2 0.0 0.0 0 -2.1372
+40 0.5 0.8 0.42 0.9 0.2 1.0 0.0 0 -2.0409
+
+ evidence_step2.csv n 40 mismatches []
+i impact urgency users anger error tier eu label logit
+1 0.6018 0.4908 0.6847 0.0275 0.7376 0.0 1.0 1 15.8667
+2 0.5323 0.6161 0.3168 0.0795 0.5969 0.0 1.0 1 5.743
+3 0.6729 0.8584 0.2248 0.658 0.7621 0.0 1.0 1 6.5727
+4 0.4601 0.5527 0.4967 0.5101 0.2314 1.0 1.0 1 2.8323
+5 0.0181 0.5486 0.9859 0.1621 0.8827 0.0 1.0 1 11.1743
+6 0.873 0.0794 0.7468 0.137 0.1892 1.0 1.0 1 16.1927
+7 0.642 0.5643 0.3752 0.5338 0.8191 0.0 1.0 1 2.1013
+8 0.7748 0.6027 0.9458 0.8814 0.3625 0.0 1.0 1 9.3312
+9 0.5562 0.891 0.935 0.0944 0.3306 0.0 1.0 1 15.9748
+10 0.7987 0.4178 0.144 0.1776 0.798 0.0 1.0 1 1.3275
+11 0.4471 0.5958 0.5263 0.5963 0.6919 1.0 1.0 1 10.4917
+12 0.4856 0.8028 0.8126 0.1901 0.3148 1.0 1.0 1 15.0998
+13 0.9288 0.4031 0.905 0.0805 0.0201 0.0 1.0 1 10.4892
+14 0.7111 0.8273 0.2544 0.5483 0.6933 0.0 1.0 1 15.4388
+15 0.9981 0.1297 0.3935 0.736 0.5292 0.0 1.0 1 13.8973
+16 0.3889 0.1786 0.9041 0.5426 0.9781 0.0 1.0 1 6.6914
+17 0.2314 0.6592 0.6369 0.6072 0.4182 0.0 0.0 0 -57.9953
+18 0.1234 0.3132 0.6102 0.4506 0.7848 0.0 1.0 0 -54.8468
+19 0.7466 0.5209 0.7184 0.5832 0.6562 0.0 1.0 1 45.3011
+20 0.9498 0.3447 0.8331 0.0492 0.6708 1.0 1.0 1 97.0396
+21 0.6731 0.9745 0.6418 0.4033 0.2728 0.0 1.0 1 36.1157
+22 0.2344 0.5465 0.7655 0.3244 0.4864 0.0 1.0 0 -8.7463
+23 0.2243 0.9504 0.2768 0.3101 0.0623 1.0 1.0 0 -23.5258
+24 0.4334 0.2561 0.6085 0.864 0.2439 0.0 0.0 0 -64.057
+25 0.6509 0.3224 0.5229 0.0222 0.049 1.0 0.0 0 -16.1519
+26 0.5022 0.0029 0.3757 0.6365 0.419 1.0 1.0 0 -22.2713
+27 0.3629 0.3256 0.4901 0.7274 0.3909 0.0 1.0 0 -59.9464
+28 0.9767 0.2474 0.7124 0.1704 0.803 0.0 1.0 1 59.8185
+29 0.4215 0.6502 0.744 0.1659 0.9413 0.0 1.0 1 43.8879
+30 0.4398 0.9558 0.3712 0.0246 0.2913 0.0 1.0 0 -4.6373
+31 0.8832 0.225 0.0746 0.7051 0.2053 0.0 0.0 0 -52.977
+32 0.8795 0.3387 0.5935 0.068 0.373 0.0 0.0 0 -9.3842
+33 0.7321 0.5 0.5 0.5 0.5 0.0 1.0 1 0.0009
+34 0.4314 0.5 0.5 0.5 0.5 1.0 1.0 0 -1.4965
+35 0.7127 0.5 0.5 0.5 0.5 0.0 1.0 0 -3.5038
+36 0.4409 0.5 0.5 0.5 0.5 1.0 1.0 0 -0.4043
+37 0.7244 0.5 0.5 0.5 0.5 0.0 1.0 0 -1.0041
+38 0.4274 0.5 0.5 0.5 0.5 1.0 1.0 0 -1.9954
+39 0.7166 0.5 0.5 0.5 0.5 0.0 1.0 0 -2.9948
+40 0.4104 0.5 0.5 0.5 0.5 1.0 1.0 0 -3.9943
+
+ evidence.csv n 32 mismatches [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+i impact urgency users anger error tier eu label logit
+1 0.405 0.0722 0.9538 0.8828 0.7882 1.0 0.0 1 -35.8118
+2 0.417 0.2736 0.3151 0.7969 0.7657 1.0 0.0 1 -62.2279
+3 0.3244 0.635 0.4476 0.1982 0.7565 1.0 0.0 1 -45.8623
+4 0.8497 0.4578 0.0836 0.0537 0.8679 1.0 1.0 1 -20.8531
+5 0.2192 0.4047 0.7413 0.5398 0.8753 1.0 0.0 1 -7.4336
+6 0.0966 0.5549 0.0247 0.8801 0.9668 1.0 1.0 1 -30.9888
+7 0.6786 0.579 0.0403 0.6134 0.7388 1.0 0.0 1 -28.4698
+8 0.0053 0.687 0.9254 0.8115 0.8122 1.0 0.0 1 -29.7276
+9 0.1033 0.6883 0.5919 0.4192 0.8459 1.0 0.0 1 -17.2145
+10 0.3339 0.4481 0.3776 0.4949 0.8681 1.0 0.0 1 -35.6284
+11 0.4474 0.183 0.0274 0.3936 0.7565 1.0 1.0 1 -54.4191
+12 0.5757 0.5144 0.1867 0.5971 0.9513 1.0 0.0 1 -21.7602
+13 0.1849 0.1981 0.0998 0.1091 0.8625 1.0 0.0 1 -85.9386
+14 0.2112 0.5742 0.28 0.1551 0.9071 1.0 0.0 1 -45.9856
+15 0.1769 0.3104 0.3588 0.2934 0.8792 1.0 1.0 1 -47.7052
+16 0.546 0.1411 0.1107 0.7182 0.9977 1.0 0.0 1 -4.5603
+17 0.6895 0.2907 0.829 0.6073 0.2407 1.0 1.0 1 24.7677
+18 0.4226 0.8605 0.2032 0.2164 0.0213 1.0 1.0 1 24.1067
+19 0.258 0.0448 0.0139 0.7678 0.1801 1.0 1.0 0 -60.4457
+20 0.7775 0.8583 0.8936 0.9764 0.7013 0.0 1.0 1 74.3611
+21 0.4024 0.6905 0.499 0.3592 0.8362 0.0 1.0 1 4.9478
+22 0.3957 0.0824 0.1924 0.7384 0.5269 1.0 0.0 0 -63.7234
+23 0.9401 0.3146 0.3357 0.8311 0.768 1.0 0.0 1 5.7657
+24 0.4221 0.0485 0.0231 0.5361 0.5321 1.0 0.0 0 -55.5612
+25 0.5601 0.5049 0.0816 0.0295 0.9003 0.0 1.0 0 -47.072
+26 0.5617 0.1913 0.7393 0.042 0.9497 0.0 0.0 0 -35.3137
+27 0.1261 0.8484 0.3633 0.973 0.9929 0.0 1.0 0 -16.1743
+28 0.1139 0.9988 0.6689 0.0766 0.5218 1.0 0.0 0 -10.4827
+29 0.803 0.3882 0.3709 0.4335 0.8516 1.0 1.0 1 55.6726
+30 0.1805 0.3427 0.506 0.2715 0.8228 0.0 0.0 0 -61.1771
+31 0.1729 0.7514 0.2837 0.5561 0.4673 1.0 0.0 0 -47.2488
+32 0.5271 0.2555 0.2734 0.2049 0.9287 0.0 0.0 0 -34.1119
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+The answers select candidate B: escalate when `tier_critical == 1` and `error_rate > 0.70`. The exact `0.70` boundary does not trigger the rule. I will add a ReLU branch and check that all other decisions remain unchanged.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -c 'import model,numpy as np
+m=model.load(\"model_in.json\")
+print(\"EU input weights:\",m[0][0][8]); print(\"EU output weight:\",m[2][0][64,0]);print(\"EU hidden outgoing:\",m[1][0][64])
+for n in [\"evidence_step1.csv\",\"evidence_step2.csv\"]:
+ a=np.genfromtxt(n,delimiter=\",\",skip_header=1)
+ print(n,\"final eight:\"); print(a[-8:,[0,1,2,3,7,8,20]])'" in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+EU input weights: [ 0.08043417  0.307293    0.34419601 -0.31687056  0.9263241   0.08198642
+ -0.01149187  0.39320062 -0.64491709 -0.44211067  0.00686346 -0.2462031
+  0.23403401  0.577162   -0.15172017  0.59841225 -0.0883821  -0.10277858
+ -0.04152533  0.09401114 -0.14565063  0.1723761  -0.20751578  0.19523492
+ -0.10224368 -0.09985862  0.15091241 -0.04753331  0.55926988  0.33032399
+ -0.09606541 -0.10983791 -0.15453357  0.20760665 -0.41039003  0.19128915
+  0.02983224  0.13978393 -0.24403334 -0.02389877 -0.0481122  -0.13182648
+  0.24603077  0.15203007  0.0301391  -0.51502681  0.51550395  0.03904951
+ -0.1316185  -0.02033604  0.24357648 -0.04998469  0.44677129 -0.16700801
+  0.04452364  0.3963997   0.01009305 -0.24589612  0.00328269 -0.04414665
+  0.34949885  0.21613624  0.26507954  0.03158263  1.        ]
+EU output weight: 17.5
+EU hidden outgoing: [0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
+ 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
+ 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 1.]
+evidence_step1.csv final eight:
+[[0.8  0.8  0.25 0.2  0.   0.   0.  ]
+ [0.8  0.5  0.06 0.2  1.   0.   0.  ]
+ [0.8  0.2  0.31 0.2  1.   0.   0.  ]
+ [0.5  0.8  0.26 0.9  1.   0.   0.  ]
+ [0.8  0.8  0.15 0.9  0.   0.   0.  ]
+ [0.8  0.8  0.14 0.9  0.   0.   0.  ]
+ [0.8  0.8  0.3  0.9  0.   0.   0.  ]
+ [0.5  0.8  0.42 0.9  1.   0.   0.  ]]
+evidence_step2.csv final eight:
+[[0.7321 0.5    0.5    0.5    0.     1.     1.    ]
+ [0.4314 0.5    0.5    0.5    1.     1.     0.    ]
+ [0.7127 0.5    0.5    0.5    0.     1.     0.    ]
+ [0.4409 0.5    0.5    0.5    1.     1.     0.    ]
+ [0.7244 0.5    0.5    0.5    0.     1.     0.    ]
+ [0.4274 0.5    0.5    0.5    1.     1.     0.    ]
+ [0.7166 0.5    0.5    0.5    0.     1.     0.    ]
+ [0.4104 0.5    0.5    0.5    1.     1.     0.    ]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -c 'import model,numpy as np
+from pathlib import Path
+m=model.load(\"model_in.json\")
+w0,b0=m[0]; w1,b1=m[1]; w2,b2=m[2]
+a0=np.zeros((20,67)); a0[:,:65]=w0; a0[5,65:67]=1; a0[7,66]=-1
+c0=np.r_[b0,-0.7,-0.7]
+a1=np.zeros((67,66)); a1[:65,:65]=w1; a1[65,65]=1; a1[66,65]=-1
+c1=np.r_[b1,0]
+a2=np.zeros((66,2)); a2[:65,0]=w2[:,0]; a2[65,1]=1
+c2=np.r_[b2,0]
+model.save([(a0,c0),(a1,c1),(a2,c2),(np.ones((2,1)),np.zeros(1))],\"model_out.json\")
+notes=\"\"\"# Inferred rules and edit
+
+1. Ignore "'`tone_anger`: evaluate the original network with that input fixed to zero. The first-step evidence supports this rule; all current input weights for anger are zero.
+2. Add 17.5 to the logit for EU alerts. The second-step evidence and the existing EU bypass support this rule.
+3. Force escalation when `tier_critical == 1` and `error_rate > 0.70`. The answers select candidate B and exclude the other candidates. Equality does not trigger this correction.
+
+I retained all existing weights and biases. Let B be the input model logit, e the error rate, t the critical-tier flag, and R the ReLU function. Added units compute:
+
+- p = R(e - 0.70)
+- q = R(e - t - 0.70)
+- g = R(p - q)
+- output = R(B) + g
+
+For binary t, g is zero outside the new condition and positive inside it. Thus the output is positive exactly when B is positive or the new rule applies. Earlier corrections remain in B. Negative logits become zero; classification is unchanged outside the new rule. No training or fitting was used.
+"""
+assert len(notes.split())<200
+Path("NOTES.md").write_text(notes)
+print("Saved model_out.json and NOTES.md; notes words:",len(notes.split()))'"'" in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+Saved model_out.json and NOTES.md; notes words: 186
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -c 'import model,numpy as np
+old=model.load(\"model_in.json\"); new=model.load(\"model_out.json\")
+def expected(x): return (model.logit(old,x)>0)|((x[:,7]==1)&(x[:,5]>0.7))
+for name in [\"evidence.csv\",\"answers.csv\",\"evidence_step1.csv\",\"evidence_step2.csv\"]:
+ a=np.genfromtxt(name,delimiter=\",\",skip_header=1);x=a[:,:20];y=a[:,20]>0;p=model.logit(new,x)>0
+ if name==\"evidence_step1.csv\":
+  assert np.array_equal((model.logit(old,x)-17.5*x[:,8])>0,y)
+  target=expected(x)
+ elif name==\"evidence_step2.csv\": target=y|((x[:,7]==1)&(x[:,5]>0.7))
+ else: target=y
+ assert np.array_equal(p,target),name
+ print(name, \"passed\",len(x),\"rows; later-rule label overrides:\",int(np.sum(target"'!=y)))
+rng=np.random.default_rng(20261104)
+x=rng.random((50000,20));x[:,[7,8,9]]=rng.integers(0,2,(50000,3))
+assert np.array_equal(model.logit(new,x)>0,expected(x))
+print("Random decision checks: 50000 passed")
+base=np.genfromtxt("answers.csv",delimiter=",",skip_header=1)[0,:20]
+rows=[]
+for t in [0,1]:
+ for eu in [0,1]:
+  for mw in [0,1]:
+   for e in [0,0.69,np.nextafter(0.7,0),0.7,np.nextafter(0.7,1),0.715,1]:
+    for latency in [0,0.1,0.9,1]:
+     row=base.copy();row[[5,6,7,8,9]]=[e,latency,t,eu,mw];rows.append(row)
+x=np.array(rows)
+assert np.array_equal(model.logit(new,x)>0,expected(x))
+print("Boundary and flag checks:",len(x),"passed, including adjacent floats around 0.70")
+y=x.copy();y[:,3]=1-x[:,3]
+assert np.array_equal(model.logit(new,x),model.logit(new,y))
+print("Anger independence checks passed")
+assert np.array_equal(new[0][0][:,:65],old[0][0])
+assert np.array_equal(new[1][0][:65,:65],old[1][0])
+assert np.array_equal(new[2][0][:65,0],old[2][0][:,0])
+for i in range(3): assert np.array_equal(new[i][1][:len(old[i][1])],old[i][1])
+print("All original weights and biases preserved")
+print("Output layer dimensions:",[w.shape for w,b in new])'"'" in $WSROOT/large/s0/astra-query8-r2/step3
+ succeeded in 0ms:
+evidence.csv passed 32 rows; later-rule label overrides: 0
+answers.csv passed 8 rows; later-rule label overrides: 0
+evidence_step1.csv passed 40 rows; later-rule label overrides: 5
+evidence_step2.csv passed 40 rows; later-rule label overrides: 0
+Random decision checks: 50000 passed
+Boundary and flag checks: 224 passed, including adjacent floats around 0.70
+Anger independence checks passed
+All original weights and biases preserved
+Output layer dimensions: [(20, 67), (67, 66), (66, 2), (2, 1)]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+Created `model_out.json` and `NOTES.md`.
+
+Applied candidate B: escalate for critical-tier alerts when `error_rate > 0.70`.
+
+Verified all supplied labels, allowing later corrections to override earlier labels. Passed 50,000 random checks and 224 boundary checks. No training was used.
+hook: Stop
+hook: Stop Completed
+tokens used
+31'133
+Created `model_out.json` and `NOTES.md`.
+
+Applied candidate B: escalate for critical-tier alerts when `error_rate > 0.70`.
+
+Verified all supplied labels, allowing later corrections to override earlier labels. Passed 50,000 random checks and 224 boundary checks. No training was used.

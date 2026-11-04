@@ -8,9 +8,10 @@ fixes? And does that hold as the net grows?
 In all 30 text-guided chains on the 5.6k- and 76.5k-param nets, the edited net
 agrees with the ideal edit of its base net on **50,000 / 50,000** held-out inputs
 (`fidelity.py`). Without the sentence (examples only), both models infer plausible
-wrong rules and land at 88-94%. On a real decision model (Laya, 421M), in a two-seed
-pilot, a plain code patch had the lowest mean error: 21.9% test error against 25.2% for the
-best weight edit at the same effort and 25.0% for fine-tuning, from 29.7% unedited.
+wrong rules and land at 91-99% (mean 94.1%). On a real decision model (Laya, 421M), in a
+two-seed pilot, code patches had the lowest mean error: 22.6-22.7% test error, against
+23.4-26.3% for weight edits (mean per model) and 25.0% for fine-tuning, from 29.7%
+unedited. Single weight-edit runs vary a lot: the best one (21.2%) beat every code patch.
 
 ![error rates](results/error_rates.png)
 
@@ -30,7 +31,10 @@ best weight edit at the same effort and 25.0% for fine-tuning, from 29.7% unedit
 - Per correction, the editor gets: the sentence, 32 labelled examples (16 that
   change, 16 near misses), the current weights, numpy for forward passes. No
   gradient methods or solvers. Workspaces sit outside this folder; every log is
-  scanned for reads of ground truth (none found).
+  scanned for reads of ground truth (none found). The examples-only and query arms
+  and the Laya rerun ran inside an enforced macOS sandbox (`sandbox.py`) that denies
+  reads of ground truth, test data, earlier runs and review files. The sentence arms
+  ran before it existed and rely on the log scan.
 - Editors: Codex `gpt-6-astra` and `gpt-6.1-sol`, reasoning effort high.
 - 3 base seeds per size. Small: 2 repeats per model per seed (12 chains).
   Large: 3 repeats (18). XL: 2 repeats (12). Examples-only: large, 1 repeat (6).
@@ -48,7 +52,7 @@ best weight edit at the same effort and 25.0% for fine-tuning, from 29.7% unedit
 | **Astra writes weights** (24-32 ex/fix) | **99.6%** (6/6) | **99.4%** (9/9) | **99.3%** (4/6 strict) |
 | **Sol writes weights** | **99.6%** (6/6) | **99.4%** (9/9) | **99.3%** (4/6 strict) |
 | Agreement with ideal edit on 50,000 sampled inputs | - | 100% (18/18) | 100% (12/12) |
-| Examples only, no sentence | - | 92.1% (88.1-94.3%, 0/6) | - |
+| Examples only, no sentence | - | 94.1% (90.9-98.8%, 0/6) | - |
 
 - Earlier fixes kept after the last step: 98.5% (large), 98.4% (xl), 99.9% (small).
   On the sampled test set, the shortfall from 100% matches the base net's own error:
@@ -76,76 +80,44 @@ Both models converge on the same toolkit (see `runs/*/seed*/*/step*/NOTES.md`):
   switch at float64 resolution. Astra notes that no finite ReLU net can make the
   switch exact over the reals and bounds the error.
 
-## Examples only (no correction sentence)
-Same chains, but the sentence is replaced by "infer the change from the examples".
-Step 1 (ignore tone) and steps 3 and 5 (sharp overrides) are inferred exactly. Step 2 and step 4
-are not: from 32 examples both models choose the same simplest-looking wrong
-rule (an EU output offset; a box in urgency × confidence). Wrong guesses are never
-corrected later. Final accuracy 88.1-94.3% (mean 92.1%), agreement with the ideal
-edit 88.1-94.5% (mean 92.2%).
+## Examples only, and examples plus asked labels
+Same chains on the large task, but the sentence is replaced by "infer the change from
+the examples". In the query modes each step has two phases. Phase 1: the model writes
+2-4 candidate rules that fit all examples, then picks up to Q inputs whose labels
+would tell them apart; the harness labels them from ground truth. Phase 2: the model
+edits. "Wide" modes require candidates from at least 3 of 4 named kinds of rule
+(output shift, region override, input re-interpretation, interaction); that list
+names the true kind for steps 2 and 4. 3 seeds x Astra and Sol per mode, 6 chains.
 
-Protocol note: in the examples-only and query arms, each step also re-supplies all
-earlier evidence and earlier answered queries, relabelled with the current target.
-That is extra supervision beyond the 32 new examples (128 labels at step 4, 160 at
-step 5, plus queries), so "1 label" and "no labels" mean new chosen queries only.
-Known defect: evidence and answers were written with 3 decimals after labelling, so
-a few boundary rows carry the wrong label for the displayed input (e.g. `error_rate`
-0.700 labelled as above 0.7). These arms need a rerun at full precision before their
-numbers are final.
+Numbers below are from the sandboxed rerun (tag `-r2`, full-precision evidence;
+`ROUND=2 python analyze.py`). Round-1 numbers are in `results/analyze_round1.txt`.
 
-## Examples plus asked labels
-Same as examples-only, but each step has two phases. Phase 1: the model writes 2-4
-candidate rules that fit all examples, then picks up to Q inputs whose labels
-would tell them apart. The harness labels them from ground truth. Phase 2: the
-model edits. Large task, 3 seeds × Astra and Sol (`mode=query1`, `query8`).
+| Mode (large, 5,569 params) | Astra | Sol | Mean (min-max) | Runs >= 99% | Step-2 fix mean / worst | Step-4 fix mean (max) |
+|---|---|---|---|---|---|---|
+| Sentence | 99.4% | 99.4% | 99.4% | 18/18 | 95.7% / 95.3% | 98.0% |
+| Examples only | 94.2% | 94.0% | 94.1% (90.9-98.8) | 0/6 | 98.5% / 97.8% | 78.6% (97.6) |
+| + 1 asked label per fix | 94.7% | 91.4% | 93.0% (86.6-97.8) | 0/6 | 94.6% / 80.8% | 80.8% (96.0) |
+| + 8 asked labels per fix | 92.3% | 93.2% | 92.7% (88.1-94.4) | 0/6 | 94.8% / 78.3% | 74.9% (77.6) |
+| Wide list, no labels | 95.5% | 88.7% | 92.1% (72.4-98.7) | 0/6 | 95.4% / 80.1% | 87.0% (100.0) |
+| Wide list + 8 asked labels | 97.3% | 98.0% | **97.6%** (96.1-99.0) | 1/6 | 96.1% / 91.9% | 91.8% (99.9) |
 
-| Mode (large, 5,569 params) | Final acc. Astra | Final acc. Sol | Step-2 fix (mean / worst) | Step-4 fix (mean) |
-|---|---|---|---|---|
-| Sentence | 99.4% | 99.4% | 95.7% / 95.3% | 98.0% |
-| Examples only | 93.1% | 91.1% | 95.3% / 78.2% | 79.2% |
-| + 1 asked label per fix | 93.3% | 90.6% | 94.7% / 76.9% | 76.9% |
-| + 8 asked labels per fix | 94.6% | 93.6% | 97.2% / 95.3% | 73.7% |
+- Step 4 ("urgency doubles when confidence is below 0.4") is the hard step. Without
+  the sentence it fails the 95% bar in almost every chain; later steps inherit the error.
+- Asked labels alone do not help: 1 or 8 labels per fix score no better than examples
+  only. The wide list alone does not help on average either, and it lets in false
+  rules (worst run 72.4%).
+- Wide list + 8 asked labels is the best mode in both rounds (rerun 97.6%, round 1
+  96.0%), with the best worst case. Only one run of 30 without the sentence reaches 99%.
+- 3 chains per model and mode: differences of 1-2 points between the other modes are
+  within run-to-run variation. Round 1 suggested a small gain from 8 labels and an
+  exact rule found by the wide list alone in 2 of 6 runs; the rerun shows neither.
 
-- One asked label changes nothing. Eight help a little: the step-2 failure
-  (Sol, seed 2: fix 78%) disappears, and final accuracy rises 1.5-2.5 points.
-- Step 4 does not improve at any budget. Every candidate rule the models write
-  is a threshold box on raw features. The true rule ("read urgency as doubled,
-  then let the network decide") is never among the candidates, so no label can
-  select it. Questions tune a rule within the kind the model proposes; they do
-  not fix a missing kind.
-- 3 chains per cell: the 8-label gain has the same sign for both models but is
-  small next to the gap to the sentence (5-6 points).
-
-### Wider candidate lists
-Phase 1 now requires candidates from at least 3 of 4 named kinds of rule (output
-shift, region override, input re-interpretation, interaction). Caveat: the list
-names the true kind for steps 2 and 4. Modes `query0w` (no labels) and `query8w`.
-
-| Mode (large) | Astra | Sol | Mean (min-max) | Runs >= 99% | Step-4 fix mean (max) |
-|---|---|---|---|---|---|
-| Sentence | 99.4% | 99.4% | 99.4% | 18/18 | 98.0% |
-| Examples only | 93.1% | 91.1% | 92.1% (88.1-94.3) | 0/6 | 79.2% (92.8) |
-| + 8 asked labels | 94.6% | 93.6% | 94.1% (92.5-95.4) | 0/6 | 73.7% (76.8) |
-| Wide list, no labels | 98.0% | 90.1% | 94.1% (79.0-99.1) | 2/6 | 91.5% (99.1) |
-| Wide list + 8 asked labels | 96.8% | 95.1% | **96.0%** (92.7-98.3) | 0/6 | 77.9% (86.1) |
-
-- A wider list lets the models find the true rule: Astra wrote "when confidence
-  < 0.4, evaluate the existing model with urgency doubled" from examples alone and
-  reached 99.0-99.1% on 2 of 3 seeds.
-- It also lets in false rules: Sol chose "suppress when error_rate <= confidence",
-  which fits all 32 examples, and fell to 79.0%.
-- Adding 8 asked labels gives the best mean and the best worst case, but no run
-  reaches 99%. In each step-4 run checked, the exact true rule was not among that
-  run's written candidates (e.g. "set impact and urgency to 1 inside a region"),
-  so the answers rejected every candidate and the model fell back to a box rule.
-- Mostly ruled out: misleading answers. At step 4, 2 of 48 asked labels in the
-  wide arm (both in Astra seed 0) and 0 of 48 in the narrow arm contradict the
-  ideal edit of the base net, i.e. the base net itself is wrong at that probe.
-  Over all query runs and steps, 13 of 480 asked labels (2.7%) contradict it,
-  against 0.8% on random inputs at step 4.
-- Whether the exact rule shows up among the drafts varies from run to run. With
-  3 chains per cell, the gap between "wide, no labels" and "wide + labels" is
-  within that variation.
+Protocol note: in these arms each step also re-supplies all earlier evidence and
+earlier answered queries, with their original labels. That is extra supervision beyond
+the 32 new examples (128 labels at step 4, 160 at step 5, plus queries), so "1 label"
+means one new chosen query per step. Round 1 wrote evidence with 3 decimals after
+labelling (a few boundary rows carried the wrong label) and relabelled earlier evidence
+with the current target; the rerun fixes both.
 
 ## Real decision model: Laya
 Laya (convaiinnovations/laya, Apache 2.0) routes Banking77 customer messages to 5
@@ -156,43 +128,57 @@ The 3 corrections target 3 of Laya's largest error clusters (exchange-rate compl
 PIN issues, eligibility questions; 80 test messages each). Code: `laya/`. Prior work
 and framing: [PRIOR_WORK.md](PRIOR_WORK.md).
 
-| Method (2 seeds each, `laya/laya_analyze.py`) | Effort | Final acc. | Acc. on correction intents | Drift elsewhere | Min/chain |
+Rerun (sandboxed, full tool transcripts; `ROUND=2 python laya/laya_analyze.py`):
+
+| Method (2 seeds each) | Effort | Final acc. (seed 0, seed 1) | Acc. on correction intents | Drift elsewhere | Min/chain |
 |---|---|---|---|---|---|
 | Unedited Laya | - | 70.3% | 12.5% | - | - |
-| Opus 5.5 code patch (Python override) | high | **78.1%** | 90.8% | 3.1% | 7 |
-| Fable 5.1 code patch | high | 77.7% | 91.3% | 2.8% | 11 |
-| Opus 5.5 code patch | medium | 77.1% | 84.8% | 1.8% | 5 |
-| Opus 5.5 writes weights | medium | 76.9% | 86.7% | 7.1% | 45 |
-| Astra code patch | high | 76.2% | 77.1% | 1.4% | 5 |
+| Fable 5.1 code patch (Python override) | high | **77.4%** (77.9, 77.0) | 89.8% | 2.0% | 9 |
+| Opus 5.5 code patch | high | 77.3% (77.7, 76.9) | 87.9% | 2.1% | 5 |
+| Opus 5.5 writes weights | high | 76.6% (76.5, 76.7) | 80.6% | 3.6% | 112 |
+| Fable 5.1 writes weights | high | 75.0% (71.1, **78.8**) | 82.9% | 12.0% | 90 |
 | Fine-tune scorer, 32 labels/fix (best of 32 configs per seed, picked on test) | - | 75.0% | 49.2% | 19.0% | - |
-| Fable 5.1 writes weights | high | 74.8% | 71.9% | 7.4% | 81 |
-| Opus 5.5 writes weights | high | 72.9% | 46.0% | 2.3% | 76 |
-| Astra writes weights | high | 67.9% | 78.8% | 23% | 71 |
-| Sol writes weights | high | 67.5% | 84.8% | 26% | 84 |
+| Opus 5.5 writes weights | medium | 73.7% (73.9, 73.5) | 65.0% | 10.0% | 70 |
 
-- **Verdict: in this two-seed pilot, Opus-high code patches had the highest mean
-  accuracy.** Not every individual run follows the ranking: one Fable-high weight-edit
-  run (77.4%) beat one Opus-high code run (76.7%). The best weight-edit mean (Opus at
-  medium) is 1.2 points below the best code-patch mean, at about 6x the time. Fine-tuning plateaus at 75-76% even with 256 labels per correction.
-- Higher effort helped code patches (Opus 77.1% -> 78.1%) but not weight edits. Opus at
-  high refused to edit on seed 0: it concluded the scorer cannot tell which department
-  it is scoring and shipped the weights unchanged. Opus at medium, same seed, fixed 96%
-  of that correction by adding a module on the raw marker vector.
+Round 1 (same protocol, no enforced sandbox; `ROUND=1`), including methods not rerun:
+
+| Method | Effort | Final acc. | Acc. on correction intents | Drift elsewhere |
+|---|---|---|---|---|
+| Opus 5.5 code patch | high | 78.1% | 90.8% | 3.1% |
+| Fable 5.1 code patch | high | 77.7% | 91.3% | 2.8% |
+| Opus 5.5 code patch | medium | 77.1% | 84.8% | 1.8% |
+| Opus 5.5 writes weights | medium | 76.9% | 86.7% | 7.1% |
+| Astra code patch | high | 76.2% | 77.1% | 1.4% |
+| Fable 5.1 writes weights | high | 74.8% | 71.9% | 7.4% |
+| Opus 5.5 writes weights | high | 72.9% | 46.0% | 2.3% |
+| Astra writes weights | high | 67.9% | 78.8% | 23% |
+| Sol writes weights | high | 67.5% | 84.8% | 26% |
+
+- **Verdict: in both rounds, code patches had the highest mean accuracy** (rerun
+  77.3-77.4%, round 1 77.1-78.1%). The best weight-edit mean is 0.8-1.2 points lower,
+  at 6-22x the time. Fine-tuning plateaus at 75-76% even with 256 labels per correction.
+- Weight edits vary much more than code patches. Fable-high scored 71.1% and 78.8% on
+  the two seeds; the 78.8% run is the best single run of any method in the rerun. The
+  weak seed also drifted most: it changed 17.7% of untouched messages, against 6.2%.
+- The same arm moves between rounds by as much as effort does: Opus-high weight edits
+  went from 72.9% (round 1, one refusal) to 76.6%, Opus-medium from 76.9% to 73.7%. With
+  2 seeds, no claim about effort for weight edits holds.
+- Round 1, Opus at high refused to edit on seed 0: it concluded the scorer cannot tell
+  which department it is scoring and shipped the weights unchanged.
 - Weight edits that work find concept directions from hundreds of messages the editor
-  writes itself and add narrow single-unit switches. Astra and Sol fix the targets but
-  move about a quarter of all other messages.
+  writes itself and add narrow single-unit switches. Astra and Sol (round 1) fix the
+  targets but move about a quarter of all other messages.
 - Unlike the synthetic tasks, edits here are approximate: drift is the main cost.
 - Columns: "Acc. on correction intents" = share of the 240 test messages covered by any of
   the 3 corrections that are routed correctly after the last step. "Drift elsewhere" =
   share of test messages outside all corrected intents whose department changed vs
   unedited Laya. Fine-tune drift and accuracy: `laya/laya_baselines.py`.
-- Isolation: during these runs the Laya test cache, Banking77 labels and the intent
-  truth sat inside the lab, reachable by an editor that went looking (as did the
-  synthetic task's `tasks.py`). Codex log scans found no reads. The Opus and Fable logs
-  hold only the final answer, not a tool transcript, so no leakage can be established
-  or ruled out for those rows; one of them reported seeing the cache and not opening
-  it, which is a self-report. All of it now lives outside the lab, and the smoke test
-  fails if it returns. Isolation is by path and log scan, not an enforced read boundary.
+- Isolation. Rerun: test data, labels and the intent truth live outside the lab, and a
+  macOS sandbox denies editors reads of them, of `laya/runs` and of the corrections file.
+  Claude editors log full tool transcripts; `laya/audit_transcripts.py` found 0 attempts
+  to read hidden data in 30 steps (one `ls` of the lab folder touched `runs/` and was
+  denied). Round 1: the same files sat inside the lab, Codex log scans found no reads,
+  and Claude logs held only the final answer, so leakage there is not ruled out.
 - Baseline numbers (here and above) are oracle-selected on the test set, which favours
   the baselines. Budgets are matched in labels only: editors also get the rule text,
   can embed hundreds of self-written messages, and can add architecture.
@@ -220,7 +206,7 @@ python3 -m venv .venv && .venv/bin/pip install numpy matplotlib
 .venv/bin/python harness.py smoke large 0          # must print SMOKE OK
 WSROOT=/some/dir/outside/this/repo .venv/bin/python harness.py edits large 0,1,2 3 astra,sol 6
 .venv/bin/python harness.py baselines large 0 1 2
-.venv/bin/python analyze.py && .venv/bin/python fidelity.py && .venv/bin/python plot.py
+ROUND=2 .venv/bin/python analyze.py && .venv/bin/python fidelity.py && .venv/bin/python plot.py
 ```
 Laya: put `laya/ground_truth/departments_truth.py` and PolyAI/banking77 (`data/`) in
 `$WEIGHT_EDIT_HIDDEN` (default `~/.weight-edit-hidden/laya`), download
@@ -230,7 +216,7 @@ cd laya && pip install torch transformers safetensors pyarrow huggingface_hub
 python laya_lab.py cache && python laya_lab.py base
 python laya_harness.py smoke
 WSROOT=/dir/outside/repo python laya_harness.py edits 0,1 opus-high,fable-high 2 text
-python laya_baselines.py 0 1 && python laya_analyze.py && python plot_laya.py
+python laya_baselines.py 0 1 && ROUND=2 python laya_analyze.py && python plot_laya.py
 ```
 Saved Laya weight files are not in the repo; the per-step test predictions are
 (`laya/runs/*/step*/test_pred.npy` are excluded too: rerun to regenerate).

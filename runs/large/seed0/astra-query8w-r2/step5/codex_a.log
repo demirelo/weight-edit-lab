@@ -1,0 +1,1784 @@
+Reading additional input from stdin...
+OpenAI Codex v0.162.1
+--------
+workdir: $WSROOT/large/s0/astra-query8w-r2/step5
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1a785-c1ab-7e23-af13-7a455b63cce5
+--------
+user
+Read TASK.md for context, then do only what QUERY.md asks. Do not write model_out.json.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I will read TASK.md and QUERY.md, then complete only the requested work.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat TASK.md QUERY.md' in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+# Weight-editing task (step 5 of 5)
+
+You are editing a neural network BY HAND. Do not train it.
+
+## The model
+`model_in.json` is a ReLU MLP with 20 inputs. Feature order:
+impact, urgency, users_affected, tone_anger, confidence, error_rate, latency_spike, tier_critical, region_eu, maintenance_window, retry_count, service_age, on_call_load, dup_alerts, sensor_drift, aux_1, aux_2, aux_3, aux_4, aux_5
+
+- tier_critical, region_eu, maintenance_window: 0 or 1
+- every other feature: a real number in [0, 1]
+
+It decides whether an operations alert is escalated: escalate iff output logit > 0.
+`model.py` has `load`, `logit`, `save`. Use this Python, which has numpy: `<lab>/.venv/bin/python`
+
+## Corrections already applied in earlier steps (must stay true)
+1. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+2. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+3. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+4. (Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+## New correction for this step
+(Not stated in words. Infer the intended behaviour change from evidence.csv and state your inferred rule in NOTES.md.)
+
+`evidence.csv` has 32 labelled examples for this correction: cases whose label
+changes, plus near-miss cases whose label must stay the same.
+
+## What to do
+Write `model_out.json` (same format as `model_in.json`) so that the model:
+1. follows the new correction everywhere it applies, not only on the examples;
+2. still follows every earlier correction;
+3. otherwise behaves exactly as `model_in.json` does.
+
+A hidden test set of 50,000 random inputs scores all three.
+
+## Rules
+- Allowed: read the weights, run forward passes on any inputs you construct,
+  reason about what units compute, change any weights or biases, add or remove
+  hidden units, add layers. Hidden activations must be ReLU; the output is one
+  linear logit.
+- Not allowed: gradient descent, optimizers, any training or fitting loop,
+  least squares or any solver fitted to data. Every weight you write must come
+  from your own reasoning. Checking your edit with forward passes is fine.
+- Write `NOTES.md`: what you changed and why, in under 200 words.
+
+`evidence_step<j>.csv` holds the examples (and answered queries) of earlier step j, labelled as they were at step j. A later correction may override some of those labels.
+# Phase 1 of 2: ask before you edit
+
+The examples may fit more than one rule. Do NOT edit the model in this phase.
+1. Write `CANDIDATES.md`: 2-4 distinct candidate rules for this step's behaviour
+   change, each consistent with every labelled example you have.
+2. Write `query.csv`: at most 8 input row(s), header = the feature names in the
+   same order as `evidence.csv`, no label column. Choose the inputs whose correct
+   labels best tell your candidates apart. Binary features must be 0 or 1; all
+   other features must be in [0, 1].
+You will then receive the correct labels in `answers.csv` and do the edit.
+
+## Cover several kinds of rule
+Your candidates must come from at least 3 of these kinds (one candidate per kind
+at least), not variations of one kind:
+- Output shift: add a constant or a region-dependent bonus to the current logit.
+- Region override: force escalate or suppress inside a box of raw feature values.
+- Input re-interpretation: the current model applied to modified inputs (one
+  feature scaled, shifted or zeroed), possibly only when a condition holds.
+- Interaction: one feature's effect on the decision depends on another feature.
+Say which kind each candidate is. Pick queries that separate the kinds first, then values.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'ls -la; cat model.py; cat evidence.csv' in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+total 784
+drwxr-xr-x@ 13 user  wheel     416 Nov  4 18:05 .
+drwxr-xr-x@  7 user  wheel     224 Nov  4 18:05 ..
+-rw-r--r--@  1 user  wheel    1253 Nov  4 18:05 QUERY.md
+-rw-r--r--@  1 user  wheel    2639 Nov  4 18:05 TASK.md
+-rw-r--r--@  1 user  wheel    4890 Nov  4 18:05 codex_a.log
+-rw-r--r--@  1 user  wheel    4560 Nov  4 18:05 default.profraw
+-rw-r--r--@  1 user  wheel   11357 Nov  4 18:05 evidence.csv
+-rw-r--r--@  1 user  wheel   13528 Nov  4 18:05 evidence_step1.csv
+-rw-r--r--@  1 user  wheel   13871 Nov  4 18:05 evidence_step2.csv
+-rw-r--r--@  1 user  wheel   13882 Nov  4 18:05 evidence_step3.csv
+-rw-r--r--@  1 user  wheel   12342 Nov  4 18:05 evidence_step4.csv
+-rw-r--r--@  1 user  wheel     806 Nov  4 18:05 model.py
+-rw-r--r--@  1 user  wheel  294855 Nov  4 18:05 model_in.json
+import json, numpy as np
+FEATURES = ["impact", "urgency", "users_affected", "tone_anger", "confidence", "error_rate", "latency_spike", "tier_critical", "region_eu", "maintenance_window", "retry_count", "service_age", "on_call_load", "dup_alerts", "sensor_drift", "aux_1", "aux_2", "aux_3", "aux_4", "aux_5"]
+def load(path):
+    d = json.load(open(path))
+    return [(np.array(L["W"], float), np.array(L["b"], float)) for L in d["layers"]]
+def logit(layers, X):
+    h = np.asarray(X, float)
+    for i, (W, b) in enumerate(layers):
+        h = h @ W + b
+        if i < len(layers) - 1:
+            h = np.maximum(h, 0)
+    return h[:, 0]
+def save(layers, path):
+    json.dump({"features": FEATURES, "layers": [{"W": np.asarray(W).tolist(), "b": np.asarray(b).tolist()} for W, b in layers]}, open(path, "w"))
+impact,urgency,users_affected,tone_anger,confidence,error_rate,latency_spike,tier_critical,region_eu,maintenance_window,retry_count,service_age,on_call_load,dup_alerts,sensor_drift,aux_1,aux_2,aux_3,aux_4,aux_5,escalate
+0.96903778133511453,0.52205125354084148,0.47659009766496852,0.72999305674392723,0.55763147157242454,0.66211671866233335,0.19030793198061746,0,1,1,0.034984065329610847,0.42652590300061111,0.29307453844247511,0.53680461293361159,0.73009777022215383,0.61112604877074206,0.87349961700074785,0.9565668854463496,0.97376801636356436,0.51986123784039062,0
+0.96872524104542568,0.74755602590150416,0.44873363627965901,0.15759186174066053,0.47004527197731816,0.965327865885521,0.18768138441143356,0,0,1,0.98759256769077874,0.28544786929471455,0.36638117460890307,0.56169990540523929,0.037949794751605537,0.76081116719735464,0.53458831779864391,0.27259102027876547,0.21415536859705031,0.29800743880115621,0
+0.028957838344460751,0.75592637137663388,0.10291633288791613,0.72361737942635174,0.1250586971898433,0.020067647614060324,0.4321006322278903,0,1,1,0.085230008357438325,0.27911822472411796,0.30405727723630194,0.8720294981453558,0.62171082901968033,0.030502494989295803,0.19639714694584975,0.66958328025701619,0.39633830122211844,0.95484621082165755,0
+0.78740837826920451,0.66086295997354771,0.10721764919074539,0.63616040976521426,0.11110697585568219,0.79630240275666075,0.45040878510158655,1,0,1,0.46230415916501932,0.7219189618372156,0.18178228490398629,0.17662870791549579,0.09417019620623035,0.73574395744053733,0.6626789894770988,0.76264927983143338,0.85683191755336807,0.052929527797552667,0
+0.035910210686666666,0.39254201311908477,0.072904725126566872,0.75722374711457219,0.65017655795874429,0.88595186516912217,0.13768471657761938,1,1,1,0.40085527881439231,0.29046145757790653,0.87732328685256522,0.79414037159587769,0.51603287064502568,0.45217790878684894,0.11021066186127837,0.42408349616612162,0.90915765303682528,0.92377243200978454,0
+0.89328596061823939,0.73535530342535693,0.0084680389480743523,0.0096169425339126535,0.017155909879520759,0.34547484547479324,0.74670308999861967,1,0,1,0.1062054434823213,0.15186333715896172,0.63679390357965804,0.070763356410341149,0.38396115140881182,0.44053947287329664,0.27963643573836394,0.90101417344770729,0.58172842243932454,0.38862051043858981,0
+0.38336418634918701,0.21894772038592469,0.25997483961348378,0.34194245049351502,0.6279580977798872,0.7067291725430136,0.3040462897749312,1,0,1,0.60231051872021557,0.29419139914180903,0.057451692249281927,0.43307949756136277,0.86933267259941904,0.5318519756091773,0.038237786766646353,0.17785434272908296,0.49993277813298553,0.14485799392019683,0
+0.58248757401359563,0.47073411930767683,0.19901541524961264,0.35287442761206422,0.07446961415545128,0.294200826626136,0.52808144774645316,0,0,1,0.29244856420193699,0.18301297813916295,0.59420907035400972,0.85119824186822668,0.16500559152086247,0.78635685110115128,0.62796472944768256,0.45538219276166247,0.40243821276368796,0.084463755530212015,0
+0.711588038370364,0.80049315433689194,0.44539232834799325,0.39892884770901837,0.097719595810540461,0.1081926120241149,0.069754190434729968,0,1,1,0.94106352047888275,0.29702660271890924,0.086109878591098754,0.66055229818587646,0.44551882111985619,0.95305302749096665,0.40223913064121342,0.62565983812032322,0.87346418143123616,0.72885603654378339,0
+0.96081276238011115,0.69955360148427137,0.19993641772423953,0.52782837590847431,0.9146921761804373,0.82404834955038642,0.81538699260942704,0,0,1,0.9507202972992207,0.20808957029239983,0.86378562508585222,0.90443130376652037,0.72958209487930892,0.47066922919200271,0.47615651456868269,0.26379951494110809,0.57007736048819879,0.71944882686169986,0
+0.79612219596490563,0.89269691439660603,0.26112470210764505,0.80151903187522022,0.63715854903331204,0.64329484395889347,0.3802133602947303,0,0,1,0.76910277772889268,0.075150374021379029,0.58144468096629742,0.66654825851788024,0.1150470034608595,0.82617645794535877,0.91628396023695624,0.21638938783082484,0.84755707840499062,0.31589747374088428,0
+0.37437676520729746,0.62922592800680233,0.20842303708856169,0.011230724405676962,0.10770850936468479,0.29955370554198768,0.57054707863102638,1,0,1,0.98710526189128323,0.34274858669317509,0.098128388253434395,0.40370780840099085,0.20599606782756563,0.32349017156407334,0.24004381411268716,0.089445807180472792,0.68539504196499001,0.49349378449110948,0
+0.43301642741712421,0.83517559032243083,0.27234815147439284,0.38778284087666337,0.28218446540334075,0.33729413990017043,0.028832027791622861,0,1,1,0.24314530511511501,0.50219946793358738,0.68508245209366969,0.85765608306451979,0.26169941298125188,0.52827831716901308,0.54747523728437797,0.90794525292637285,0.189124607136959,0.98915267600255741,0
+0.52255473220386439,0.6414680257994948,0.11806623670807237,0.39648693558270576,0.39934430348465966,0.19462158898564541,0.92585020634056059,0,1,1,0.11615186407259881,0.55318983433265134,0.3875076659955321,0.30407309102829305,0.66421085344222286,0.74262860356137772,0.5580260187248739,0.21897857011737898,0.79204950344422265,0.82664361073866588,0
+0.46499051261409696,0.89642495352143237,0.31964352813493013,0.2558138339110908,0.15808964793623059,0.45034930907282522,0.81431826342921343,1,1,1,0.2582760291000693,0.23287280756460693,0.39134118792899519,0.25846107197783041,0.23874919377855586,0.32638396818344839,0.29142441809216635,0.81127561152093841,0.1966105091446162,0.92372515218051476,0
+0.61428287695915784,0.59092547528700023,0.25541988275357874,0.09335093397109917,0.29648800444365908,0.32529554918473325,0.056734070085397437,1,1,1,0.21939321310041915,0.38589925164848893,0.79807983440977448,0.73741123587013202,0.25805222070589728,0.44673828047818942,0.99980249614799643,0.026023633126675216,0.23938592584338914,0.21260998793155594,0
+0.093423110746581273,0.71411775306761582,0.70816262030161925,0.79220658356850815,0.43764965905206366,0.13561024754561002,0.72204124482236176,0,0,1,0.60484288260517927,0.42102644851005966,0.14351145469360937,0.26117924367206868,0.80699518072506349,0.32470832126728222,0.4164448890214727,0.72054999361221472,0.9350398838566697,0.45489876184343392,0
+0.35553663755526954,0.27724591571668344,0.10613839714819795,0.42405938562319667,0.46026704893187176,0.49056866872483562,0.76065473947637663,0,1,1,0.64279729106984373,0.06424075967200904,0.88524085432348931,0.29879388926156203,0.20668132767935599,0.54039392953050891,0.46431153722130136,0.63661366386030749,0.10141039777118976,0.098926449793241278,0
+0.41390418911754978,0.5584925851672331,0.56778752944896582,0.60119876426713126,0.90353159730959676,0.90450978071430022,0.10980191640641335,1,0,0,0.04604555052428938,0.67708693690202748,0.51430404245693651,0.25313159684050801,0.912829116033544,0.6993605470355998,0.73222106858723168,0.15950490272245677,0.29509575023635382,0.74682561035659134,1
+0.44448490120701156,0.6734516366486728,0.49399683948641449,0.72001931878506575,0.73999866925494606,0.77463013927961144,0.68974316763090227,0,1,0,0.41301088731878977,0.75310151045979157,0.16852658006287025,0.059067681778454229,0.2233949101130106,0.49618493301821587,0.79286726137436547,0.016092709908692493,0.091601330842304152,0.09235520969280453,0
+0.76728706188894924,0.28915966679816918,0.54439957529726779,0.24269769832443733,0.25522943855128211,0.54442511732812371,0.21472403933438511,0,0,0,0.022341294427864589,0.34625244691515844,0.82394762148861134,0.77519989635390252,0.011073598702262877,0.57309053458833703,0.9000439062136758,0.70476148198793909,0.34999200178950929,0.71449870390294268,1
+0.61166052904023449,0.72071377832438321,0.11855903614782737,0.35116964876385715,0.25801550157327791,0.14294722692081896,0.72105082783567609,0,0,1,0.72987137624276843,0.983091457199469,0.94389226261649473,0.35150706254588848,0.27537215680151172,0.26503168149076095,0.34945012212060189,0.52837543257394359,0.79940966323012996,0.060175437164345036,0
+0.55911311723527635,0.0064508603370234674,0.40564163858678082,0.94073802421122255,0.29585667002385896,0.28160396263844623,0.16935347614158347,1,0,0,0.94484592073795204,0.82296739246300843,0.019936603729893143,0.25504949013797862,0.76365917208791745,0.34632124629290961,0.83089002817981572,0.63554762884208937,0.066268468348985698,0.83772440889142519,0
+0.15095543775851494,0.62033210810274331,0.50234037715888769,0.024671073378621067,0.17174919632978558,0.17064118323421218,0.72411086214845133,0,1,0,0.82530458862533584,0.80466260755416974,0.65295482165178742,0.68938104238236886,0.30667185767096583,0.94970388744985834,0.34346998919272576,0.61608874855225404,0.19111057158850808,0.81196358051679085,0
+0.81059336746806543,0.21519305683239631,0.49089475102394287,0.42010268362872771,0.66276527473205527,0.30233605189389767,0.98327322915910165,0,0,0,0.61553202914006433,0.24178512151607767,0.53644338552700011,0.27754907032808962,0.93191443237702265,0.55688359607568139,0.63553583979649186,0.59642635958550139,0.077820250475772679,0.83241230423544899,0
+0.062516430670095269,0.62267009291175335,0.31303738874647802,0.2410079870717976,0.45238316983480642,0.46146548033193724,0.55648484101480433,1,0,1,0.40464617840999295,0.79506317819338734,0.24802356959461458,0.86869761820332025,0.23995190656406207,0.067350112141216001,0.013622465998742284,0.79361734448198373,0.2812644788215124,0.28076724671023223,0
+0.76497204038721001,0.61441272764678434,0.48174691417648485,0.19463377315403463,0.29683285052974362,0.94966774195088977,0.80297310739024086,0,0,0,0.75096250889594096,0.32452308693046006,0.98070971246593419,0.25300367316110783,0.76304527263652366,0.59984827666304541,0.16445517870890658,0.21819148329644911,0.19635066006744029,0.91958914157503713,1
+0.92356562146020904,0.45686766990751848,0.52074928882064175,0.71542170981770936,0.96893274322896716,0.2822890652282678,0.75486006056633537,0,1,0,0.74011922338279867,0.1985775180514614,0.93354406120764843,0.038391537724024261,0.81679869732893118,0.23670877890483677,0.69998591262158272,0.83488792106943677,0.84306790883043592,0.09835796715362255,0
+0.69657421843547906,0.66176623422207537,0.49171519013491771,0.5853994969873122,0.41950219009135148,0.23706542863369795,0.2299996762446106,1,1,0,0.83232278521845438,0.63565523911538668,0.22356165036785247,0.066326207053147068,0.54056329191142283,0.64680881736774976,0.86647461202472897,0.37227977409987079,0.13220342214266378,0.036090799988222844,0
+0.99425001236538291,0.17532975981337995,0.46211590705180527,0.73727977058048999,0.44410343363782445,0.86825299957721225,0.33758123381267691,0,0,0,0.68374019472671277,0.50333844594983412,0.56794541494105277,0.096740497907436773,0.79504051042971347,0.92312383794899977,0.57058069412855472,0.82110912765604982,0.42952006611095317,0.99351499184715519,0
+0.72362483733426197,0.89974665202027482,0.52555358124110485,0.7587271991686847,0.59396415488019416,0.86230355120271029,0.83324765693906266,1,0,0,0.069993795694218264,0.11516762686326154,0.95883885383712231,0.28340555588981986,0.54769653212553171,0.83396699268515673,0.30368555893323856,0.15902526915533544,0.4338226511044595,0.41701824993186321,1
+0.49616198373649323,0.16739920006361708,0.70520073300531783,0.060108370201821804,0.1017687781796528,0.42650215673867553,0.88619797357089924,0,0,1,0.85976567879629062,0.18604324419237173,0.8404414601912612,0.98762445991466674,0.31069590136906367,0.64981574109234885,0.19921172173409973,0.094232797590288464,0.99704214069759556,0.39701345359243512,0
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python - <<'PY'
+import numpy as np
+from model import *
+m=load('model_in.json'); a=np.genfromtxt('evidence.csv',delimiter=',',skip_header=1); X=a[:,:20]; y=a[:,20]; z=logit(m,X)
+print('layers',[(w.shape,b.shape) for w,b in m])
+for i,(x,t,s) in enumerate(zip(X,y,z),1): print(i,int(t),round(s,4),'mw',int(x[9]),'users',round(x[2],3),'urg',round(x[1],3))
+for li,(w,b) in enumerate(m):
+ print('LAYER',li)
+ if w.size<2500:
+  for j in range(len(b)):
+   nz=np.flatnonzero(w[:,j]); print(j,'b',b[j],'terms',[(int(k),round(w[k,j],6)) for k in nz])
+ else: print('bias',b,'nonzeros',np.count_nonzero(w))
+print('Transforms maintenance only:')
+for f in [0,1,2,5,6,7]:
+ T=X.copy(); T[X[:,9]==1,f]=0
+ zz=logit(m,T)
+ print(FEATURES[f], 'mismatch',np.flatnonzero((zz>0)"'!=y)+1,'"'max mw',zz[X[:,9]==1].max())
+PY" in $WSROOT/large/s0/astra-query8w-r2/step5
+ exited 1 in 0ms:
+zsh:1: can't create temp file for here document: operation not permitted
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -c 'import numpy as np
+from model import *
+m=load(\"model_in.json\"); a=np.genfromtxt(\"evidence.csv\",delimiter=\",\",skip_header=1); X=a[:,:20]; y=a[:,20]; z=logit(m,X)
+print(\"layers\",[(w.shape,b.shape) for w,b in m])
+for i,(x,t,s) in enumerate(zip(X,y,z),1): print(i,int(t),round(s,4),\"mw\",int(x[9]),\"users\",round(x[2],3),\"urg\",round(x[1],3))
+for li,(w,b) in enumerate(m):
+ print(\"LAYER\",li)
+ if w.size<2500:
+  for j in range(len(b)):
+   nz=np.flatnonzero(w[:,j]); print(j,\"b\",b[j],\"terms\",[(int(k),round(w[k,j],6)) for k in nz])
+ else: print(\"bias\",b,\"nonzeros\",np.count_nonzero(w))
+print(\"Transforms maintenance only:\")
+for f in [0,1,2,5,6,7]:
+ T=X.copy(); T[X[:,9]==1,f]=0
+ zz=logit(m,T)
+ print(FEATURES[f], \"mismatch\",np.flatnonzero((zz>0)"'!=y)+1,"max mw",zz[X[:,9]==1].max())
+'"'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+layers [((20, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 30), (30,)), ((30, 27), (27,)), ((27, 22), (22,)), ((22, 23), (23,)), ((23, 22), (22,)), ((22, 23), (23,)), ((23, 21), (21,)), ((21, 20), (20,)), ((20, 68), (68,)), ((68, 68), (68,)), ((68, 4), (4,)), ((4, 1), (1,))]
+1 0 46.8324 mw 1 users 0.477 urg 0.522
+2 0 41.838 mw 1 users 0.449 urg 0.748
+3 0 12.9056 mw 1 users 0.103 urg 0.756
+4 0 17.0788 mw 1 users 0.107 urg 0.661
+5 0 0.186 mw 1 users 0.073 urg 0.393
+6 0 40.6022 mw 1 users 0.008 urg 0.735
+7 0 0.0067 mw 1 users 0.26 urg 0.219
+8 0 15.8811 mw 1 users 0.199 urg 0.471
+9 0 43.3585 mw 1 users 0.445 urg 0.8
+10 0 31.4359 mw 1 users 0.2 urg 0.7
+11 0 28.5906 mw 1 users 0.261 urg 0.893
+12 0 26.3774 mw 1 users 0.208 urg 0.629
+13 0 59.8444 mw 1 users 0.272 urg 0.835
+14 0 5.5013 mw 1 users 0.118 urg 0.641
+15 0 79.363 mw 1 users 0.32 urg 0.896
+16 0 44.6857 mw 1 users 0.255 urg 0.591
+17 0 -1.5644 mw 1 users 0.708 urg 0.714
+18 0 -1.2094 mw 1 users 0.106 urg 0.277
+19 1 0.2045 mw 0 users 0.568 urg 0.558
+20 0 -0.9254 mw 0 users 0.494 urg 0.673
+21 1 21.5051 mw 0 users 0.544 urg 0.289
+22 0 -1.5571 mw 1 users 0.119 urg 0.721
+23 0 -0.4184 mw 0 users 0.406 urg 0.006
+24 0 -1.5294 mw 0 users 0.502 urg 0.62
+25 0 -1.3977 mw 0 users 0.491 urg 0.215
+26 0 -0.2385 mw 1 users 0.313 urg 0.623
+27 1 31.8303 mw 0 users 0.482 urg 0.614
+28 0 -1.4177 mw 0 users 0.521 urg 0.457
+29 0 -0.4629 mw 0 users 0.492 urg 0.662
+30 0 -0.8317 mw 0 users 0.462 urg 0.175
+31 1 64.2424 mw 0 users 0.526 urg 0.9
+32 0 -1.2735 mw 1 users 0.705 urg 0.167
+LAYER 0
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.4 terms [(4, np.float64(-1.0))]
+21 b 0.0 terms [(1, np.float64(1.0))]
+22 b 1.0 terms [(4, np.float64(-1.0))]
+23 b 0.5 terms [(1, np.float64(0.5)), (4, np.float64(-0.5))]
+24 b 0.0 terms [(1, np.float64(1.0))]
+25 b 1.0 terms [(4, np.float64(-1.0))]
+26 b 0.5 terms [(1, np.float64(0.5)), (4, np.float64(-0.5))]
+LAYER 1
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 2
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.25)), (27, np.float64(0.5))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.25)), (28, np.float64(0.5))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.25)), (29, np.float64(0.5))]
+LAYER 3
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 4
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0625)), (27, np.float64(0.125))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0625)), (28, np.float64(0.125))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0625)), (29, np.float64(0.125))]
+LAYER 5
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 6
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.015625)), (27, np.float64(0.03125))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.015625)), (28, np.float64(0.03125))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.015625)), (29, np.float64(0.03125))]
+LAYER 7
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 8
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.003906)), (27, np.float64(0.007812))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.003906)), (28, np.float64(0.007812))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.003906)), (29, np.float64(0.007812))]
+LAYER 9
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 10
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.000977)), (27, np.float64(0.001953))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.000977)), (28, np.float64(0.001953))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.000977)), (29, np.float64(0.001953))]
+LAYER 11
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 12
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.000244)), (27, np.float64(0.000488))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.000244)), (28, np.float64(0.000488))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.000244)), (29, np.float64(0.000488))]
+LAYER 13
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 14
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-6.1e-05)), (27, np.float64(0.000122))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-6.1e-05)), (28, np.float64(0.000122))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-6.1e-05)), (29, np.float64(0.000122))]
+LAYER 15
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 16
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-1.5e-05)), (27, np.float64(3.1e-05))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-1.5e-05)), (28, np.float64(3.1e-05))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-1.5e-05)), (29, np.float64(3.1e-05))]
+LAYER 17
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 18
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-4e-06)), (27, np.float64(8e-06))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-4e-06)), (28, np.float64(8e-06))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-4e-06)), (29, np.float64(8e-06))]
+LAYER 19
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 20
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-1e-06)), (27, np.float64(2e-06))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-1e-06)), (28, np.float64(2e-06))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-1e-06)), (29, np.float64(2e-06))]
+LAYER 21
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 22
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 23
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 24
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 25
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 26
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 27
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 28
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 29
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 30
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 31
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 32
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 33
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 34
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 35
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0))]
+22 b 0.0 terms [(25, np.float64(1.0))]
+23 b 0.0 terms [(26, np.float64(1.0))]
+24 b 0.0 terms [(21, np.float64(2.0))]
+25 b 0.0 terms [(22, np.float64(2.0))]
+26 b 0.0 terms [(23, np.float64(2.0))]
+27 b -1.0 terms [(21, np.float64(2.0))]
+28 b -1.0 terms [(22, np.float64(2.0))]
+29 b -1.0 terms [(23, np.float64(2.0))]
+LAYER 36
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(1.0)), (27, np.float64(-2.0))]
+22 b 0.0 terms [(25, np.float64(1.0)), (28, np.float64(-2.0))]
+23 b 0.0 terms [(26, np.float64(1.0)), (29, np.float64(-2.0))]
+24 b 0.0 terms [(21, np.float64(1.0)), (24, np.float64(-0.0)), (27, np.float64(0.0))]
+25 b 0.0 terms [(22, np.float64(1.0)), (25, np.float64(-0.0)), (28, np.float64(0.0))]
+26 b 0.0 terms [(23, np.float64(1.0)), (26, np.float64(-0.0)), (29, np.float64(0.0))]
+LAYER 37
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(24, np.float64(-0.5)), (25, np.float64(-0.5)), (26, np.float64(2.0))]
+LAYER 38
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(21, np.float64(1.0))]
+22 b -1.0 terms [(0, np.float64(1.0)), (21, np.float64(1.0))]
+LAYER 39
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(21, np.float64(1.0)), (22, np.float64(-1.0))]
+LAYER 40
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(20, np.float64(1.0))]
+21 b 0.0 terms [(21, np.float64(1.0))]
+22 b 0.0 terms [(20, np.float64(-10000000000.0)), (21, np.float64(1.0))]
+LAYER 41
+0 b 0.0 terms [(0, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+20 b 0.0 terms [(21, np.float64(1.0)), (22, np.float64(-1.0))]
+LAYER 42
+0 b 0.0 terms [(0, np.float64(1.0)), (20, np.float64(1.0))]
+1 b 0.0 terms [(1, np.float64(1.0))]
+2 b 0.0 terms [(2, np.float64(1.0))]
+3 b 0.0 terms [(3, np.float64(1.0))]
+4 b 0.0 terms [(4, np.float64(1.0))]
+5 b 0.0 terms [(5, np.float64(1.0))]
+6 b 0.0 terms [(6, np.float64(1.0))]
+7 b 0.0 terms [(7, np.float64(1.0))]
+8 b 0.0 terms [(8, np.float64(1.0))]
+9 b 0.0 terms [(9, np.float64(1.0))]
+10 b 0.0 terms [(10, np.float64(1.0))]
+11 b 0.0 terms [(11, np.float64(1.0))]
+12 b 0.0 terms [(12, np.float64(1.0))]
+13 b 0.0 terms [(13, np.float64(1.0))]
+14 b 0.0 terms [(14, np.float64(1.0))]
+15 b 0.0 terms [(15, np.float64(1.0))]
+16 b 0.0 terms [(16, np.float64(1.0))]
+17 b 0.0 terms [(17, np.float64(1.0))]
+18 b 0.0 terms [(18, np.float64(1.0))]
+19 b 0.0 terms [(19, np.float64(1.0))]
+LAYER 43
+0 b 0.6939999897192053 terms [(0, np.float64(0.067622)), (1, np.float64(-0.025212)), (2, np.float64(0.196405)), (4, np.float64(0.006552)), (5, np.float64(0.119838)), (6, np.float64(0.042231)), (7, np.float64(-0.102694)), (9, np.float64(-0.066642)), (10, np.float64(-0.932528)), (11, np.float64(-0.860493)), (12, np.float64(-0.251153)), (13, np.float64(0.044795)), (14, np.float64(-0.057481)), (15, np.float64(0.187131)), (16, np.float64(-0.171008)), (17, np.float64(0.222878)), (18, np.float64(-0.033495)), (19, np.float64(0.12513))]
+1 b 0.44188702559116705 terms [(0, np.float64(-0.368782)), (1, np.float64(-0.461072)), (2, np.float64(-0.461147)), (4, np.float64(0.13437)), (5, np.float64(0.116859)), (6, np.float64(-0.122897)), (7, np.float64(-0.222744)), (9, np.float64(0.005752)), (10, np.float64(0.746575)), (11, np.float64(0.543245)), (12, np.float64(0.003231)), (13, np.float64(-0.12416)), (14, np.float64(0.035169)), (15, np.float64(0.212488)), (16, np.float64(0.146115)), (17, np.float64(-0.361303)), (18, np.float64(0.131023)), (19, np.float64(-0.006802))]
+2 b 0.3282514990345505 terms [(0, np.float64(-0.878916)), (1, np.float64(-0.800138)), (2, np.float64(0.836702)), (4, np.float64(0.619525)), (5, np.float64(0.022935)), (6, np.float64(-0.251786)), (7, np.float64(-0.046418)), (9, np.float64(-0.14255)), (10, np.float64(0.312624)), (11, np.float64(0.262279)), (12, np.float64(0.037093)), (13, np.float64(0.032914)), (14, np.float64(0.153783)), (15, np.float64(0.329954)), (16, np.float64(-0.199526)), (17, np.float64(-0.227474)), (18, np.float64(0.415454)), (19, np.float64(-0.018441))]
+3 b 0.4454798734455913 terms [(0, np.float64(-0.178267)), (1, np.float64(-0.516365)), (2, np.float64(0.025466)), (4, np.float64(0.078305)), (5, np.float64(0.245694)), (6, np.float64(-0.73904)), (7, np.float64(0.643629)), (9, np.float64(-0.144237)), (10, np.float64(-0.030275)), (11, np.float64(0.007757)), (12, np.float64(0.250992)), (13, np.float64(-0.130256)), (14, np.float64(-0.243948)), (15, np.float64(0.280709)), (16, np.float64(-0.009104)), (17, np.float64(0.338343)), (18, np.float64(-0.038097)), (19, np.float64(0.106686))]
+4 b 0.322752503960909 terms [(0, np.float64(-0.284348)), (1, np.float64(-0.260651)), (2, np.float64(-0.065737)), (4, np.float64(-0.162336)), (5, np.float64(-0.010587)), (6, np.float64(-0.340584)), (7, np.float64(0.986909)), (9, np.float64(0.023614)), (10, np.float64(-0.474804)), (11, np.float64(-0.578582)), (12, np.float64(0.178815)), (13, np.float64(-0.015114)), (14, np.float64(0.021914)), (15, np.float64(-0.213397)), (16, np.float64(-0.038792)), (17, np.float64(0.086875)), (18, np.float64(-0.093492)), (19, np.float64(0.000607))]
+5 b 0.04444336229237578 terms [(0, np.float64(0.023039)), (1, np.float64(0.096216)), (2, np.float64(-0.119968)), (4, np.float64(-0.087922)), (5, np.float64(0.083465)), (6, np.float64(0.413354)), (7, np.float64(0.127268)), (9, np.float64(0.112461)), (10, np.float64(-1.287945)), (11, np.float64(1.141513)), (12, np.float64(-0.104694)), (13, np.float64(-0.152942)), (14, np.float64(-0.036887)), (15, np.float64(-0.1933)), (16, np.float64(0.229266)), (17, np.float64(-0.215604)), (18, np.float64(0.126842)), (19, np.float64(-0.223993))]
+6 b -0.3916806109450279 terms [(0, np.float64(-0.34702)), (1, np.float64(-0.253307)), (2, np.float64(1.135813)), (4, np.float64(0.036275)), (5, np.float64(1.098419)), (6, np.float64(-0.165829)), (7, np.float64(-0.12093)), (9, np.float64(-0.031566)), (10, np.float64(0.025512)), (11, np.float64(0.101466)), (12, np.float64(-0.00134)), (13, np.float64(-0.102325)), (14, np.float64(-0.01189)), (15, np.float64(0.05753)), (16, np.float64(-0.028473)), (17, np.float64(0.083808)), (18, np.float64(0.011608)), (19, np.float64(0.043153))]
+7 b 0.6409245932099256 terms [(0, np.float64(-0.098395)), (1, np.float64(-0.166563)), (2, np.float64(0.326234)), (4, np.float64(-0.24765)), (5, np.float64(-0.469141)), (6, np.float64(0.728174)), (7, np.float64(-0.743842)), (9, np.float64(0.270873)), (10, np.float64(-0.038487)), (11, np.float64(-0.061761)), (12, np.float64(0.1691)), (13, np.float64(0.009326)), (14, np.float64(-0.11201)), (15, np.float64(-0.079651)), (16, np.float64(-0.196705)), (17, np.float64(-0.068728)), (18, np.float64(-0.035397)), (19, np.float64(0.176924))]
+8 b 0.7570435649494893 terms [(0, np.float64(-0.201589)), (1, np.float64(-0.189134)), (2, np.float64(-0.343879)), (4, np.float64(-0.020519)), (5, np.float64(0.561032)), (6, np.float64(-0.058723)), (7, np.float64(0.513036)), (9, np.float64(-0.153597)), (10, np.float64(-0.566492)), (11, np.float64(-0.708539)), (12, np.float64(-0.034752)), (13, np.float64(0.020696)), (14, np.float64(0.218512)), (15, np.float64(0.023789)), (16, np.float64(-0.054593)), (17, np.float64(-0.017793)), (18, np.float64(0.260657)), (19, np.float64(-0.080486))]
+9 b 0.5467992523813676 terms [(0, np.float64(-0.252746)), (1, np.float64(-0.599235)), (2, np.float64(0.15599)), (4, np.float64(0.63611)), (5, np.float64(0.054065)), (6, np.float64(-0.293612)), (7, np.float64(-0.184517)), (9, np.float64(0.019092)), (10, np.float64(0.399299)), (11, np.float64(0.097815)), (12, np.float64(0.51434)), (13, np.float64(-0.351271)), (14, np.float64(0.203695)), (15, np.float64(0.063227)), (16, np.float64(0.336067)), (17, np.float64(-0.023916)), (18, np.float64(0.447894)), (19, np.float64(0.272214))]
+10 b 0.42961491913453337 terms [(0, np.float64(-0.312693)), (1, np.float64(-0.176999)), (2, np.float64(-0.692939)), (4, np.float64(0.185103)), (5, np.float64(0.208707)), (6, np.float64(-0.232947)), (7, np.float64(-0.116382)), (9, np.float64(-0.326677)), (10, np.float64(-0.271346)), (11, np.float64(1.047773)), (12, np.float64(0.34354)), (13, np.float64(0.079491)), (14, np.float64(-0.22269)), (15, np.float64(0.065887)), (16, np.float64(-0.090859)), (17, np.float64(0.979506)), (18, np.float64(0.330329)), (19, np.float64(0.103726))]
+11 b -0.023788410776568184 terms [(0, np.float64(0.352175)), (1, np.float64(0.609902)), (2, np.float64(-1.0983)), (4, np.float64(0.162619)), (5, np.float64(-0.799621)), (6, np.float64(0.440105)), (7, np.float64(0.272208)), (9, np.float64(0.244033)), (10, np.float64(0.431863)), (11, np.float64(-0.530189)), (12, np.float64(0.115801)), (13, np.float64(0.192277)), (14, np.float64(-0.076418)), (15, np.float64(0.256252)), (16, np.float64(-0.212172)), (17, np.float64(0.223656)), (18, np.float64(0.219445)), (19, np.float64(0.192854))]
+12 b 0.588822170093402 terms [(0, np.float64(-0.355398)), (1, np.float64(-0.042685)), (2, np.float64(-0.072091)), (4, np.float64(0.010818)), (5, np.float64(-0.174705)), (6, np.float64(-0.110422)), (7, np.float64(0.139262)), (9, np.float64(-0.140047)), (10, np.float64(0.350396)), (11, np.float64(0.205455)), (12, np.float64(0.188732)), (13, np.float64(-0.186723)), (14, np.float64(0.819784)), (15, np.float64(0.170144)), (16, np.float64(-0.537391)), (17, np.float64(-0.07376)), (18, np.float64(0.510563)), (19, np.float64(0.205579))]
+13 b -0.42034880689109855 terms [(0, np.float64(0.532187)), (1, np.float64(0.224743)), (2, np.float64(0.530613)), (4, np.float64(0.351864)), (5, np.float64(-0.30519)), (6, np.float64(0.115381)), (7, np.float64(-0.078198)), (9, np.float64(-0.299287)), (10, np.float64(0.435457)), (11, np.float64(0.110175)), (12, np.float64(0.169616)), (13, np.float64(0.285176)), (14, np.float64(0.240764)), (15, np.float64(-0.21336)), (16, np.float64(0.027067)), (17, np.float64(-0.248585)), (18, np.float64(0.392894)), (19, np.float64(-0.072544))]
+14 b 0.6180372505255584 terms [(0, np.float64(-0.184338)), (1, np.float64(-0.270604)), (2, np.float64(-0.006737)), (4, np.float64(0.412481)), (5, np.float64(-0.130622)), (6, np.float64(0.604604)), (7, np.float64(-1.917305)), (9, np.float64(-0.056212)), (10, np.float64(0.235368)), (11, np.float64(0.241301)), (12, np.float64(0.282287)), (13, np.float64(0.179742)), (14, np.float64(-0.327995)), (15, np.float64(-0.050617)), (16, np.float64(0.140307)), (17, np.float64(-0.219239)), (18, np.float64(0.068421)), (19, np.float64(0.100447))]
+15 b 0.5711007842718467 terms [(0, np.float64(-0.491708)), (1, np.float64(-0.435047)), (2, np.float64(-0.564246)), (4, np.float64(-0.021922)), (5, np.float64(0.105355)), (6, np.float64(-0.280371)), (7, np.float64(0.333453)), (9, np.float64(0.09746)), (10, np.float64(-0.194074)), (11, np.float64(-0.559228)), (12, np.float64(0.144404)), (13, np.float64(0.373706)), (14, np.float64(-0.008705)), (15, np.float64(0.139843)), (16, np.float64(0.518509)), (17, np.float64(0.223294)), (18, np.float64(-0.133432)), (19, np.float64(-0.195696))]
+16 b -0.48579875884908646 terms [(0, np.float64(0.683233)), (1, np.float64(0.629032)), (2, np.float64(0.443131)), (4, np.float64(0.220142)), (5, np.float64(0.075798)), (6, np.float64(0.102393)), (7, np.float64(0.088459)), (9, np.float64(0.753412)), (10, np.float64(-0.20712)), (11, np.float64(0.286528)), (12, np.float64(0.61867)), (13, np.float64(0.395627)), (14, np.float64(0.145301)), (15, np.float64(0.157704)), (16, np.float64(0.515424)), (17, np.float64(0.208032)), (18, np.float64(-0.157103)), (19, np.float64(0.025195))]
+17 b 0.503176685129839 terms [(0, np.float64(-0.04224)), (1, np.float64(-0.28336)), (2, np.float64(-0.571755)), (4, np.float64(0.405418)), (5, np.float64(0.737884)), (6, np.float64(0.16541)), (7, np.float64(0.113143)), (9, np.float64(-0.066923)), (10, np.float64(0.333674)), (11, np.float64(-0.151112)), (12, np.float64(0.183279)), (13, np.float64(0.467941)), (14, np.float64(-0.251881)), (15, np.float64(0.175937)), (16, np.float64(-0.510098)), (17, np.float64(0.274883)), (18, np.float64(0.353173)), (19, np.float64(0.025695))]
+18 b -0.5108043105186468 terms [(0, np.float64(0.517866)), (1, np.float64(0.602067)), (2, np.float64(0.160413)), (4, np.float64(0.294139)), (5, np.float64(0.811088)), (6, np.float64(-0.007569)), (7, np.float64(0.540204)), (9, np.float64(-0.151648)), (10, np.float64(0.071194)), (11, np.float64(0.011402)), (12, np.float64(0.6703)), (13, np.float64(0.129071)), (14, np.float64(0.038579)), (15, np.float64(0.069494)), (16, np.float64(-0.352489)), (17, np.float64(-0.171814)), (18, np.float64(0.02727)), (19, np.float64(0.661023))]
+19 b 0.6822097633211622 terms [(0, np.float64(-0.45412)), (1, np.float64(-0.386398)), (2, np.float64(-0.248922)), (4, np.float64(-0.003624)), (5, np.float64(0.094223)), (6, np.float64(0.626677)), (7, np.float64(-1.624785)), (9, np.float64(0.161756)), (10, np.float64(-0.272912)), (11, np.float64(-0.070857)), (12, np.float64(0.39176)), (13, np.float64(-0.19893)), (14, np.float64(0.110956)), (15, np.float64(0.096265)), (16, np.float64(0.106797)), (17, np.float64(0.187967)), (18, np.float64(0.110932)), (19, np.float64(0.069494))]
+20 b -0.3560987870704078 terms [(0, np.float64(-0.775708)), (1, np.float64(-0.521522)), (2, np.float64(0.377153)), (4, np.float64(-0.19309)), (5, np.float64(0.444102)), (6, np.float64(0.706245)), (7, np.float64(-0.635487)), (9, np.float64(-0.010531)), (10, np.float64(0.408871)), (11, np.float64(0.867573)), (12, np.float64(-0.132498)), (13, np.float64(-0.114826)), (14, np.float64(0.406726)), (15, np.float64(0.134422)), (16, np.float64(-0.019282)), (17, np.float64(0.124413)), (18, np.float64(0.173876)), (19, np.float64(0.26487))]
+21 b 0.6504589805786827 terms [(0, np.float64(-0.441865)), (1, np.float64(-0.128957)), (2, np.float64(-0.011006)), (4, np.float64(0.203562)), (5, np.float64(0.09302)), (6, np.float64(0.135042)), (7, np.float64(-0.311352)), (9, np.float64(0.231938)), (10, np.float64(0.149352)), (11, np.float64(0.224894)), (12, np.float64(0.252659)), (13, np.float64(-0.282316)), (14, np.float64(0.276582)), (15, np.float64(-0.009434)), (16, np.float64(-0.090255)), (17, np.float64(0.261768)), (18, np.float64(-0.449799)), (19, np.float64(0.083628))]
+22 b 0.5417372726677067 terms [(0, np.float64(-0.173354)), (1, np.float64(0.058824)), (2, np.float64(0.010564)), (4, np.float64(0.202095)), (5, np.float64(0.00358)), (6, np.float64(-0.364148)), (7, np.float64(0.064919)), (9, np.float64(-0.211449)), (10, np.float64(0.478725)), (11, np.float64(0.664348)), (12, np.float64(0.20695)), (13, np.float64(0.096822)), (14, np.float64(0.349354)), (15, np.float64(-0.132341)), (16, np.float64(-0.042685)), (17, np.float64(-0.069365)), (18, np.float64(-0.321409)), (19, np.float64(-0.065539))]
+23 b 0.32048762012878923 terms [(0, np.float64(-0.379997)), (1, np.float64(-0.464621)), (2, np.float64(-0.67792)), (4, np.float64(-0.169799)), (5, np.float64(0.451991)), (6, np.float64(-0.787611)), (7, np.float64(0.691938)), (9, np.float64(0.157744)), (10, np.float64(0.27068)), (11, np.float64(0.285401)), (12, np.float64(-0.069867)), (13, np.float64(0.049805)), (14, np.float64(0.241064)), (15, np.float64(0.192889)), (16, np.float64(0.178109)), (17, np.float64(-0.044097)), (18, np.float64(0.428875)), (19, np.float64(0.186361))]
+24 b -0.41581580934801277 terms [(0, np.float64(0.664808)), (1, np.float64(-0.003373)), (2, np.float64(0.687495)), (4, np.float64(-0.085262)), (5, np.float64(-0.244934)), (6, np.float64(0.25895)), (7, np.float64(0.079498)), (9, np.float64(-0.186224)), (10, np.float64(-0.323689)), (11, np.float64(-0.126536)), (12, np.float64(0.605947)), (13, np.float64(0.297313)), (14, np.float64(0.467326)), (15, np.float64(0.266485)), (16, np.float64(-0.275242)), (17, np.float64(-0.099209)), (18, np.float64(0.373474)), (19, np.float64(0.178531))]
+25 b 0.5677899047014382 terms [(0, np.float64(-0.210248)), (1, np.float64(-0.240087)), (2, np.float64(-0.899949)), (4, np.float64(0.03199)), (5, np.float64(0.919431)), (6, np.float64(-0.028603)), (7, np.float64(-0.037104)), (9, np.float64(0.014234)), (10, np.float64(-0.013573)), (11, np.float64(0.098188)), (12, np.float64(-0.045145)), (13, np.float64(-0.081347)), (14, np.float64(0.070674)), (15, np.float64(-0.086179)), (16, np.float64(-0.06237)), (17, np.float64(-0.123585)), (18, np.float64(-0.071976)), (19, np.float64(0.173402))]
+26 b 0.5511541317308767 terms [(0, np.float64(-0.408464)), (1, np.float64(-0.026086)), (2, np.float64(0.081905)), (4, np.float64(0.243979)), (5, np.float64(0.015247)), (6, np.float64(0.336629)), (7, np.float64(-0.664933)), (9, np.float64(-0.289464)), (10, np.float64(-0.218409)), (11, np.float64(-0.003779)), (12, np.float64(-0.179789)), (13, np.float64(0.059411)), (14, np.float64(-0.105021)), (15, np.float64(-0.455005)), (16, np.float64(0.346977)), (17, np.float64(-0.349498)), (18, np.float64(0.297242)), (19, np.float64(-0.243675))]
+27 b -0.45697012288162936 terms [(0, np.float64(1.105581)), (1, np.float64(-0.206748)), (2, np.float64(0.092484)), (4, np.float64(0.025518)), (5, np.float64(-0.368131)), (6, np.float64(-0.027254)), (7, np.float64(-0.028632)), (9, np.float64(0.262598)), (10, np.float64(0.243357)), (11, np.float64(0.279156)), (12, np.float64(0.01485)), (13, np.float64(0.377969)), (14, np.float64(0.321032)), (15, np.float64(0.199162)), (16, np.float64(0.499783)), (17, np.float64(0.493703)), (18, np.float64(-0.251121)), (19, np.float64(0.162))]
+28 b 0.5931165127195902 terms [(0, np.float64(-0.338117)), (1, np.float64(-0.693872)), (2, np.float64(-0.228965)), (4, np.float64(-0.427691)), (5, np.float64(0.047477)), (6, np.float64(0.415771)), (7, np.float64(0.340709)), (9, np.float64(0.166839)), (10, np.float64(0.185911)), (11, np.float64(0.113141)), (12, np.float64(-0.046218)), (13, np.float64(-0.003883)), (14, np.float64(0.181652)), (15, np.float64(0.25713)), (16, np.float64(-0.10545)), (17, np.float64(0.225392)), (18, np.float64(0.433107)), (19, np.float64(0.460273))]
+29 b -0.5421296017148423 terms [(0, np.float64(0.364611)), (1, np.float64(0.228185)), (2, np.float64(0.14712)), (4, np.float64(-0.301254)), (5, np.float64(0.484368)), (6, np.float64(-0.129517)), (7, np.float64(0.483868)), (9, np.float64(0.095469)), (10, np.float64(0.657821)), (11, np.float64(0.263899)), (12, np.float64(-0.565462)), (13, np.float64(0.588265)), (14, np.float64(0.619021)), (15, np.float64(0.311735)), (16, np.float64(0.219001)), (17, np.float64(0.321397)), (18, np.float64(0.296779)), (19, np.float64(-0.064504))]
+30 b 0.6267177586011946 terms [(0, np.float64(-0.072336)), (1, np.float64(-0.651181)), (2, np.float64(0.038351)), (4, np.float64(0.367302)), (5, np.float64(-0.472376)), (6, np.float64(-0.352442)), (7, np.float64(0.115112)), (9, np.float64(-0.097191)), (10, np.float64(0.167855)), (11, np.float64(0.779512)), (12, np.float64(-0.076234)), (13, np.float64(-0.032973)), (14, np.float64(0.184731)), (15, np.float64(0.635795)), (16, np.float64(0.227734)), (17, np.float64(0.156522)), (18, np.float64(0.252645)), (19, np.float64(-0.115087))]
+31 b 0.3796420321985106 terms [(0, np.float64(0.080048)), (1, np.float64(-0.491543)), (2, np.float64(-0.639495)), (4, np.float64(0.084467)), (5, np.float64(0.289853)), (6, np.float64(0.488241)), (7, np.float64(0.075228)), (9, np.float64(-0.295134)), (10, np.float64(0.575748)), (11, np.float64(0.156024)), (12, np.float64(0.231142)), (13, np.float64(-0.198321)), (14, np.float64(0.180754)), (15, np.float64(-0.158828)), (16, np.float64(0.261909)), (17, np.float64(0.184258)), (18, np.float64(0.191882)), (19, np.float64(-0.492866))]
+32 b 0.5082607390956497 terms [(0, np.float64(-0.241538)), (1, np.float64(-0.050044)), (2, np.float64(0.21168)), (4, np.float64(-0.100345)), (5, np.float64(-0.579769)), (6, np.float64(-0.228482)), (7, np.float64(-0.656385)), (9, np.float64(0.131038)), (10, np.float64(0.925059)), (11, np.float64(0.705107)), (12, np.float64(-0.673633)), (13, np.float64(0.126978)), (14, np.float64(-0.071517)), (15, np.float64(0.272821)), (16, np.float64(0.18023)), (17, np.float64(0.18554)), (18, np.float64(-0.302581)), (19, np.float64(-0.095279))]
+33 b 0.6822237949705835 terms [(0, np.float64(-0.59286)), (1, np.float64(-0.123844)), (2, np.float64(-0.043808)), (4, np.float64(0.191606)), (5, np.float64(0.020041)), (6, np.float64(-0.663241)), (7, np.float64(-0.003571)), (9, np.float64(-0.05737)), (10, np.float64(-0.027512)), (11, np.float64(0.128214)), (12, np.float64(0.167855)), (13, np.float64(-0.079492)), (14, np.float64(0.48118)), (15, np.float64(0.693317)), (16, np.float64(-0.159151)), (17, np.float64(0.111906)), (18, np.float64(0.309176)), (19, np.float64(-0.273302))]
+34 b 0.674607912421493 terms [(0, np.float64(-0.228173)), (1, np.float64(0.003482)), (2, np.float64(-0.118933)), (4, np.float64(-0.276328)), (5, np.float64(-0.013618)), (6, np.float64(0.617569)), (7, np.float64(-1.693499)), (9, np.float64(-0.061438)), (10, np.float64(0.123346)), (11, np.float64(0.034437)), (12, np.float64(-0.115644)), (13, np.float64(0.051754)), (14, np.float64(0.09642)), (15, np.float64(-0.10805)), (16, np.float64(0.334007)), (17, np.float64(0.088325)), (18, np.float64(0.149386)), (19, np.float64(0.061702))]
+35 b -0.5241945448416966 terms [(0, np.float64(0.290869)), (1, np.float64(0.464579)), (2, np.float64(-0.07754)), (4, np.float64(-0.258308)), (5, np.float64(-0.019395)), (6, np.float64(0.564386)), (7, np.float64(0.174483)), (9, np.float64(-0.071306)), (10, np.float64(0.269895)), (11, np.float64(-0.362011)), (12, np.float64(0.250656)), (13, np.float64(0.244727)), (14, np.float64(0.250962)), (15, np.float64(0.085359)), (16, np.float64(0.148268)), (17, np.float64(-0.066822)), (18, np.float64(0.099253)), (19, np.float64(0.581532))]
+36 b -0.4272369290239504 terms [(0, np.float64(0.35432)), (1, np.float64(0.2446)), (2, np.float64(0.476224)), (4, np.float64(0.356826)), (5, np.float64(-0.276301)), (6, np.float64(0.395244)), (7, np.float64(-0.03683)), (9, np.float64(0.1417)), (10, np.float64(-0.572038)), (11, np.float64(0.490187)), (12, np.float64(0.206271)), (13, np.float64(-0.098743)), (14, np.float64(0.336001)), (15, np.float64(0.096752)), (16, np.float64(-0.227331)), (17, np.float64(0.17282)), (18, np.float64(0.462609)), (19, np.float64(-0.10367))]
+37 b 0.6754149727359359 terms [(0, np.float64(-0.471283)), (1, np.float64(-0.200728)), (2, np.float64(-0.370867)), (4, np.float64(-0.138872)), (5, np.float64(0.541371)), (6, np.float64(-0.207729)), (7, np.float64(0.251555)), (9, np.float64(0.311235)), (10, np.float64(0.685308)), (11, np.float64(-0.242653)), (12, np.float64(0.023697)), (13, np.float64(0.028568)), (14, np.float64(0.4315)), (15, np.float64(-0.198148)), (16, np.float64(0.273091)), (17, np.float64(0.350028)), (18, np.float64(-0.088558)), (19, np.float64(0.038065))]
+38 b 0.27904256439032915 terms [(0, np.float64(-0.378032)), (1, np.float64(-0.302724)), (2, np.float64(0.554327)), (4, np.float64(-0.097242)), (5, np.float64(-0.8136)), (6, np.float64(-0.116896)), (7, np.float64(0.109628)), (9, np.float64(-0.040955)), (10, np.float64(0.696651)), (11, np.float64(0.665973)), (12, np.float64(-0.00085)), (13, np.float64(-0.163075)), (14, np.float64(-0.179267)), (15, np.float64(0.025764)), (16, np.float64(-0.139151)), (17, np.float64(0.127922)), (18, np.float64(-0.058026)), (19, np.float64(0.069696))]
+39 b -0.4026499949571022 terms [(0, np.float64(0.68748)), (1, np.float64(0.144651)), (2, np.float64(0.366093)), (4, np.float64(0.474311)), (5, np.float64(0.60719)), (6, np.float64(-0.298981)), (7, np.float64(0.323434)), (9, np.float64(0.087835)), (10, np.float64(0.49923)), (11, np.float64(-0.250557)), (12, np.float64(-0.185717)), (13, np.float64(-0.233159)), (14, np.float64(-0.134793)), (15, np.float64(0.272833)), (16, np.float64(-0.158516)), (17, np.float64(0.29072)), (18, np.float64(0.297199)), (19, np.float64(-0.371106))]
+40 b 0.5226654831138294 terms [(0, np.float64(0.068211)), (1, np.float64(-0.078932)), (2, np.float64(-0.731184)), (4, np.float64(-0.156141)), (5, np.float64(0.284762)), (6, np.float64(0.256866)), (7, np.float64(-0.763095)), (9, np.float64(-0.066516)), (10, np.float64(-0.171657)), (11, np.float64(-0.02693)), (12, np.float64(0.092111)), (13, np.float64(-0.048713)), (14, np.float64(0.070677)), (15, np.float64(-0.321543)), (16, np.float64(0.091239)), (17, np.float64(-0.09559)), (18, np.float64(0.171334)), (19, np.float64(0.272458))]
+41 b 0.5659967371766751 terms [(0, np.float64(-0.83825)), (1, np.float64(-0.072939)), (2, np.float64(-0.107904)), (4, np.float64(0.406662)), (5, np.float64(-0.343349)), (6, np.float64(0.358775)), (7, np.float64(-0.17256)), (9, np.float64(0.184773)), (10, np.float64(0.573168)), (11, np.float64(0.184089)), (12, np.float64(0.230406)), (13, np.float64(-0.128324)), (14, np.float64(0.431205)), (15, np.float64(-0.065827)), (16, np.float64(-0.141661)), (17, np.float64(-0.031207)), (18, np.float64(0.53558)), (19, np.float64(0.40716))]
+42 b 0.4672553018538791 terms [(0, np.float64(-0.276236)), (1, np.float64(-0.161369)), (2, np.float64(-0.175265)), (4, np.float64(-0.255604)), (5, np.float64(0.083664)), (6, np.float64(0.439359)), (7, np.float64(0.656202)), (9, np.float64(0.019846)), (10, np.float64(0.330917)), (11, np.float64(0.057588)), (12, np.float64(0.104268)), (13, np.float64(-0.080745)), (14, np.float64(0.101466)), (15, np.float64(-0.018199)), (16, np.float64(0.344352)), (17, np.float64(-0.326843)), (18, np.float64(-0.162778)), (19, np.float64(-0.08928))]
+43 b 0.4744763220723517 terms [(0, np.float64(-0.293067)), (1, np.float64(-0.207008)), (2, np.float64(-0.258528)), (4, np.float64(-0.008642)), (5, np.float64(0.111399)), (6, np.float64(0.20451)), (7, np.float64(-0.530699)), (9, np.float64(0.184229)), (10, np.float64(0.19847)), (11, np.float64(0.434178)), (12, np.float64(-0.078816)), (13, np.float64(-0.359606)), (14, np.float64(-0.147494)), (15, np.float64(0.019079)), (16, np.float64(0.286253)), (17, np.float64(-0.113487)), (18, np.float64(-0.029005)), (19, np.float64(-0.214501))]
+44 b -0.45387703040534055 terms [(0, np.float64(0.617808)), (1, np.float64(0.573399)), (2, np.float64(0.177857)), (4, np.float64(0.04858)), (5, np.float64(0.382585)), (6, np.float64(0.186253)), (7, np.float64(-0.110139)), (9, np.float64(-0.042528)), (10, np.float64(0.519744)), (11, np.float64(0.20442)), (12, np.float64(-0.257933)), (13, np.float64(0.077756)), (14, np.float64(0.175302)), (15, np.float64(-0.388987)), (16, np.float64(0.436391)), (17, np.float64(0.415315)), (18, np.float64(-0.22807)), (19, np.float64(-0.162902))]
+45 b 0.5435575686577429 terms [(0, np.float64(0.256525)), (1, np.float64(-0.3456)), (2, np.float64(-0.459725)), (4, np.float64(0.035929)), (5, np.float64(0.149016)), (6, np.float64(-0.290021)), (7, np.float64(-0.387843)), (9, np.float64(0.701758)), (10, np.float64(-0.224909)), (11, np.float64(0.144794)), (12, np.float64(-0.294376)), (13, np.float64(0.541825)), (14, np.float64(-0.116923)), (15, np.float64(-0.490377)), (16, np.float64(0.090133)), (17, np.float64(0.204054)), (18, np.float64(0.096213)), (19, np.float64(-0.255638))]
+46 b -0.40620254112266385 terms [(0, np.float64(0.460826)), (1, np.float64(0.024596)), (2, np.float64(0.561937)), (4, np.float64(0.598011)), (5, np.float64(-0.518015)), (6, np.float64(-0.061926)), (7, np.float64(-0.076529)), (9, np.float64(0.177398)), (10, np.float64(-0.629295)), (11, np.float64(0.152687)), (12, np.float64(0.055118)), (13, np.float64(0.24103)), (14, np.float64(0.460711)), (15, np.float64(-0.191339)), (16, np.float64(0.588692)), (17, np.float64(0.351976)), (18, np.float64(0.228972)), (19, np.float64(0.025445))]
+47 b -0.3897834954541273 terms [(0, np.float64(0.822842)), (1, np.float64(0.726184)), (2, np.float64(0.144835)), (4, np.float64(0.083776)), (5, np.float64(0.766758)), (6, np.float64(0.457828)), (7, np.float64(-0.026226)), (9, np.float64(-0.328437)), (10, np.float64(-0.186576)), (11, np.float64(-0.123327)), (12, np.float64(-0.082472)), (13, np.float64(0.032186)), (14, np.float64(0.469861)), (15, np.float64(-0.092628)), (16, np.float64(-0.156783)), (17, np.float64(0.441547)), (18, np.float64(0.253675)), (19, np.float64(-0.363335))]
+48 b 0.6750343947305919 terms [(0, np.float64(-0.017576)), (1, np.float64(-0.098574)), (2, np.float64(0.740089)), (4, np.float64(0.274199)), (5, np.float64(-0.968816)), (6, np.float64(0.122867)), (7, np.float64(0.149699)), (9, np.float64(-0.214143)), (10, np.float64(-0.067786)), (11, np.float64(-0.21435)), (12, np.float64(-0.067872)), (13, np.float64(-0.008144)), (14, np.float64(0.040914)), (15, np.float64(-0.036966)), (16, np.float64(0.536572)), (17, np.float64(-0.066634)), (18, np.float64(-0.402527)), (19, np.float64(0.072766))]
+49 b -0.1845381133680341 terms [(0, np.float64(-0.000918)), (1, np.float64(-0.042626)), (2, np.float64(-0.023984)), (4, np.float64(-0.056835)), (5, np.float64(0.12221)), (6, np.float64(-0.11289)), (7, np.float64(-0.022661)), (9, np.float64(0.023429)), (10, np.float64(0.940658)), (11, np.float64(-1.008074)), (12, np.float64(0.101151)), (13, np.float64(-0.156161)), (14, np.float64(0.048075)), (15, np.float64(-0.09133)), (16, np.float64(0.240815)), (17, np.float64(-0.191347)), (18, np.float64(0.159526)), (19, np.float64(0.079146))]
+50 b 0.6813751727689853 terms [(0, np.float64(0.154556)), (1, np.float64(-0.097006)), (2, np.float64(-0.174083)), (4, np.float64(-0.05203)), (5, np.float64(0.010661)), (6, np.float64(0.517781)), (7, np.float64(-1.662615)), (9, np.float64(-0.209727)), (10, np.float64(-0.087184)), (11, np.float64(-0.063499)), (12, np.float64(-0.208652)), (13, np.float64(-0.300695)), (14, np.float64(0.146981)), (15, np.float64(0.091208)), (16, np.float64(-0.077588)), (17, np.float64(-0.09465)), (18, np.float64(0.260099)), (19, np.float64(0.122938))]
+51 b 0.6609027322952251 terms [(0, np.float64(-0.310483)), (1, np.float64(-0.084931)), (2, np.float64(1.054589)), (4, np.float64(0.10341)), (5, np.float64(-0.986385)), (6, np.float64(-0.474832)), (7, np.float64(0.28098)), (9, np.float64(-0.074407)), (10, np.float64(-0.29937)), (11, np.float64(-0.203835)), (12, np.float64(0.039324)), (13, np.float64(0.003455)), (14, np.float64(0.046566)), (15, np.float64(-0.161055)), (16, np.float64(0.292987)), (17, np.float64(-0.155898)), (18, np.float64(0.324993)), (19, np.float64(0.148489))]
+52 b 0.5343636265473594 terms [(0, np.float64(-0.333712)), (1, np.float64(-0.099365)), (2, np.float64(-0.767379)), (4, np.float64(0.323407)), (5, np.float64(0.203236)), (6, np.float64(-0.03111)), (7, np.float64(0.061486)), (9, np.float64(0.030079)), (10, np.float64(0.466882)), (11, np.float64(0.633818)), (12, np.float64(0.090178)), (13, np.float64(-0.200938)), (14, np.float64(-0.165993)), (15, np.float64(-0.297828)), (16, np.float64(0.303135)), (17, np.float64(0.435262)), (18, np.float64(0.177302)), (19, np.float64(-0.142926))]
+53 b -0.5230834047000674 terms [(0, np.float64(0.921342)), (1, np.float64(0.505142)), (2, np.float64(0.167539)), (4, np.float64(-0.109782)), (5, np.float64(0.090935)), (6, np.float64(-0.136958)), (7, np.float64(-0.023689)), (9, np.float64(-0.123048)), (10, np.float64(0.100881)), (11, np.float64(0.241547)), (12, np.float64(0.157983)), (13, np.float64(0.204441)), (14, np.float64(-0.03508)), (15, np.float64(0.466871)), (16, np.float64(0.384)), (17, np.float64(-0.039667)), (18, np.float64(-0.160641)), (19, np.float64(0.394844))]
+54 b 0.703334816545306 terms [(0, np.float64(-0.151591)), (1, np.float64(0.198651)), (2, np.float64(-0.094692)), (4, np.float64(0.089466)), (5, np.float64(-0.184261)), (6, np.float64(0.093614)), (7, np.float64(-0.089079)), (9, np.float64(0.234661)), (10, np.float64(0.051152)), (11, np.float64(-0.04228)), (12, np.float64(-0.039566)), (13, np.float64(-0.404385)), (14, np.float64(0.172853)), (15, np.float64(0.172056)), (16, np.float64(0.409988)), (17, np.float64(0.069834)), (18, np.float64(-0.064539)), (19, np.float64(0.055257))]
+55 b 0.6045509081246632 terms [(0, np.float64(-0.269844)), (1, np.float64(-0.226382)), (2, np.float64(0.397276)), (4, np.float64(0.128593)), (5, np.float64(-0.156012)), (6, np.float64(-0.280767)), (7, np.float64(0.448125)), (9, np.float64(-0.335036)), (10, np.float64(0.463111)), (11, np.float64(-0.310635)), (12, np.float64(0.21076)), (13, np.float64(-0.054282)), (14, np.float64(0.41)), (15, np.float64(0.099878)), (16, np.float64(0.241766)), (17, np.float64(0.497154)), (18, np.float64(-0.068714)), (19, np.float64(-0.635498))]
+56 b 0.2606527380078958 terms [(0, np.float64(-0.415152)), (1, np.float64(-0.36542)), (2, np.float64(-0.123827)), (4, np.float64(0.015746)), (5, np.float64(-0.151466)), (6, np.float64(-1.11152)), (7, np.float64(1.121537)), (9, np.float64(0.073539)), (10, np.float64(0.108664)), (11, np.float64(0.158222)), (12, np.float64(0.093991)), (13, np.float64(-0.262554)), (14, np.float64(0.019528)), (15, np.float64(-0.030856)), (16, np.float64(0.146291)), (17, np.float64(-0.024147)), (18, np.float64(0.200277)), (19, np.float64(0.073318))]
+57 b 0.5366667221059109 terms [(0, np.float64(-0.396675)), (1, np.float64(-0.347996)), (2, np.float64(0.518855)), (4, np.float64(-0.13259)), (5, np.float64(-0.504731)), (6, np.float64(0.321851)), (7, np.float64(0.360583)), (9, np.float64(-0.117191)), (10, np.float64(0.055354)), (11, np.float64(-0.198203)), (12, np.float64(0.003621)), (13, np.float64(0.228264)), (14, np.float64(0.237865)), (15, np.float64(0.386069)), (16, np.float64(0.099229)), (17, np.float64(0.22179)), (18, np.float64(-0.065554)), (19, np.float64(0.088366))]
+58 b 0.6438923928144487 terms [(0, np.float64(0.058259)), (1, np.float64(-0.349394)), (2, np.float64(0.710138)), (4, np.float64(0.136764)), (5, np.float64(-0.732568)), (6, np.float64(-0.214318)), (7, np.float64(0.215333)), (9, np.float64(0.294324)), (10, np.float64(0.229594)), (11, np.float64(-0.189631)), (12, np.float64(-0.068533)), (13, np.float64(-0.433333)), (14, np.float64(-0.213291)), (15, np.float64(-0.131448)), (16, np.float64(0.079168)), (17, np.float64(0.440939)), (18, np.float64(0.436489)), (19, np.float64(0.012684))]
+59 b 0.6077526669430219 terms [(0, np.float64(-0.337168)), (1, np.float64(-0.279064)), (2, np.float64(0.70429)), (4, np.float64(0.064482)), (5, np.float64(-0.533116)), (6, np.float64(0.237345)), (7, np.float64(-0.768975)), (9, np.float64(-0.037495)), (10, np.float64(0.444635)), (11, np.float64(0.618662)), (12, np.float64(-0.0077)), (13, np.float64(0.059675)), (14, np.float64(0.008039)), (15, np.float64(-0.236858)), (16, np.float64(-0.56571)), (17, np.float64(0.025454)), (18, np.float64(0.080537)), (19, np.float64(-0.143146))]
+60 b 0.26887688359316686 terms [(0, np.float64(-0.260794)), (1, np.float64(-0.255778)), (2, np.float64(0.353832)), (4, np.float64(-0.077381)), (5, np.float64(-0.685953)), (6, np.float64(0.082147)), (7, np.float64(-1.119104)), (9, np.float64(0.021244)), (10, np.float64(0.182687)), (11, np.float64(0.344663)), (12, np.float64(-0.233119)), (13, np.float64(-0.215342)), (14, np.float64(0.088629)), (15, np.float64(-0.223718)), (16, np.float64(-0.07173)), (17, np.float64(-0.033422)), (18, np.float64(0.21703)), (19, np.float64(-0.227622))]
+61 b -0.5000157482497425 terms [(0, np.float64(-0.036095)), (1, np.float64(0.429923)), (2, np.float64(0.942841)), (4, np.float64(0.004739)), (5, np.float64(0.496508)), (6, np.float64(0.704163)), (7, np.float64(0.306813)), (9, np.float64(0.565192)), (10, np.float64(-0.35504)), (11, np.float64(-0.226595)), (12, np.float64(0.243305)), (13, np.float64(-0.131531)), (14, np.float64(-0.166261)), (15, np.float64(0.045848)), (16, np.float64(0.388441)), (17, np.float64(-0.044435)), (18, np.float64(-0.067262)), (19, np.float64(-0.086332))]
+62 b -0.3806505265686375 terms [(0, np.float64(0.470513)), (1, np.float64(0.366167)), (2, np.float64(-0.190662)), (4, np.float64(0.028767)), (5, np.float64(-0.078297)), (6, np.float64(0.288131)), (7, np.float64(0.018405)), (9, np.float64(0.12095)), (10, np.float64(-0.086856)), (11, np.float64(-0.155912)), (12, np.float64(0.10729)), (13, np.float64(0.2192)), (14, np.float64(0.185734)), (15, np.float64(-0.00123)), (16, np.float64(-0.292042)), (17, np.float64(-0.267701)), (18, np.float64(0.452705)), (19, np.float64(0.148979))]
+63 b -0.4568475160138879 terms [(0, np.float64(0.361865)), (1, np.float64(0.691771)), (2, np.float64(-0.233199)), (4, np.float64(0.555944)), (5, np.float64(0.775297)), (6, np.float64(0.499558)), (7, np.float64(0.170398)), (9, np.float64(-0.100265)), (10, np.float64(-0.08449)), (11, np.float64(-0.529138)), (12, np.float64(-0.139839)), (13, np.float64(0.72343)), (14, np.float64(0.118121)), (15, np.float64(-0.04657)), (16, np.float64(0.232478)), (17, np.float64(-0.226404)), (18, np.float64(0.444465)), (19, np.float64(0.188698))]
+64 b 0.0 terms [(8, np.float64(1.0))]
+65 b -0.7 terms [(5, np.float64(1.0))]
+66 b 0.7 terms [(5, np.float64(-1.0))]
+67 b 1.0 terms [(7, np.float64(-1.0))]
+LAYER 44
+bias [-0.37264425  0.47378012 -0.36532043  0.49156801  0.48054641 -0.3325704
+ -0.57980925 -0.33200102  0.39644417 -0.20114183  0.57496403 -0.41325009
+  0.41493774 -0.02032828  0.43627611 -0.38069701 -0.44715314 -0.365144
+  0.4022349   0.48703385  0.5514282  -0.00869433 -0.38454382 -0.49544035
+ -0.03100318 -0.35946852  0.85369883  0.59578747 -0.3460758  -0.36975696
+  0.37800121 -0.03609435  0.47797756  0.47154534 -0.34416491 -0.01422805
+ -0.03852218 -0.01970177  0.4282761  -0.5309214   0.31040342  0.4375466
+ -0.37819713  0.68168528  0.39670601 -0.34346743 -0.09174178 -0.02258282
+  0.45320955  0.44986222  0.49866407 -0.42712404  0.42420209 -0.44043759
+  0.53530055  0.71947054  0.53465828 -0.39166478  0.40503166 -0.44147369
+ -0.06746767  0.47688815  0.53579244 -0.34389437  0.          0.
+  0.          0.        ] nonzeros 4100
+LAYER 45
+0 b -0.3535508605210373 terms [(0, np.float64(0.768287)), (1, np.float64(-0.580483)), (2, np.float64(0.538054)), (3, np.float64(-0.642636)), (4, np.float64(-0.932505)), (5, np.float64(1.095449)), (6, np.float64(1.616071)), (7, np.float64(0.995832)), (8, np.float64(-0.439713)), (9, np.float64(0.726129)), (10, np.float64(-0.663044)), (11, np.float64(0.434338)), (12, np.float64(-0.58816)), (13, np.float64(0.119216)), (14, np.float64(-0.45995)), (15, np.float64(0.363946)), (16, np.float64(0.391694)), (17, np.float64(0.638067)), (18, np.float64(-0.926071)), (19, np.float64(-0.452643)), (20, np.float64(-1.101452)), (21, np.float64(-0.339058)), (22, np.float64(0.450717)), (23, np.float64(1.458053)), (24, np.float64(0.074831)), (25, np.float64(0.799207)), (26, np.float64(-1.769394)), (27, np.float64(-1.38047)), (28, np.float64(1.090808)), (29, np.float64(2.034707)), (30, np.float64(-1.509377)), (31, np.float64(-0.430279)), (32, np.float64(-0.468906)), (33, np.float64(-0.593684)), (34, np.float64(0.650351)), (35, np.float64(0.081)), (36, np.float64(-0.306523)), (37, np.float64(0.565009)), (38, np.float64(-0.612287)), (39, np.float64(2.220565)), (40, np.float64(-1.162873)), (41, np.float64(-0.889379)), (42, np.float64(0.420658)), (43, np.float64(-1.455072)), (44, np.float64(-0.61466)), (45, np.float64(0.687505)), (46, np.float64(1.68554)), (47, np.float64(0.03141)), (48, np.float64(-0.608509)), (49, np.float64(-0.907261)), (50, np.float64(-0.543761)), (51, np.float64(0.493208)), (52, np.float64(-0.870828)), (53, np.float64(1.639563)), (54, np.float64(-0.662009)), (55, np.float64(-1.139973)), (56, np.float64(-0.891907)), (57, np.float64(0.411463)), (58, np.float64(-0.737418)), (59, np.float64(0.58489)), (60, np.float64(0.084883)), (61, np.float64(-0.78154)), (62, np.float64(-0.92609)), (63, np.float64(0.784454)), (64, np.float64(17.5)), (65, np.float64(-1.0)), (66, np.float64(1.0)), (67, np.float64(1.0))]
+1 b 0.0 terms [(65, np.float64(1.0))]
+2 b 0.0 terms [(66, np.float64(1.0))]
+3 b 0.0 terms [(67, np.float64(1.0))]
+LAYER 46
+0 b 0.0 terms [(0, np.float64(1.0)), (1, np.float64(1.0)), (2, np.float64(-1.0)), (3, np.float64(-1.0))]
+Transforms maintenance only:
+impact mismatch [ 3  4  5  6  7  9 13 15] max mw 63.950034533087184
+urgency mismatch [1 4 5 7] max mw 3.439018401705966
+users_affected mismatch [ 1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16] max mw 68.72843328985851
+error_rate mismatch [ 1  2  3  4  6  8  9 10 11 12 13 14 15 16] max mw 68.28267817495647
+latency_spike mismatch [ 1  2  3  4  5  6  7  8  9 10 11 13 14 15 16] max mw 59.69069526157213
+tier_critical mismatch [ 1  2  3  8  9 10 11 13 14 15 16] max mw 59.844393350930986
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+All 16 changed examples have maintenance enabled and users_affected below 0.5. I will check several rule types and select queries that distinguish them.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -B -c 'import numpy as np
+from model import *
+m=load(\"model_in.json\"); a=np.genfromtxt(\"evidence.csv\",delimiter=\",\",skip_header=1); X=a[:,:20]; y=a[:,20]
+for f in range(20):
+ for v in [0,1]:
+  T=X.copy(); T[X[:,9]==1,f]=v; z=logit(m,T); bad=np.flatnonzero((z>0)"'!=y)+1
+  if len(bad)<=3: print(FEATURES[f],v,"mismatches",bad.tolist())
+for j in range(1,5):
+ a=np.genfromtxt("evidence_step%d.csv"%j,delimiter=",",skip_header=1); z=logit(m,a[:,:20]); print("step",j,"rows",len(a),"current mismatches",(np.flatnonzero((z>0)!=a[:,20])+1).tolist(),"maintenance positive",np.sum((a[:,9]==1)&(a[:,20]==1)))
+'"'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+step 1 rows 40 current mismatches [4, 6, 8, 11, 16, 18] maintenance positive 6
+step 2 rows 40 current mismatches [22, 25, 32, 36] maintenance positive 5
+step 3 rows 40 current mismatches [35, 36, 37] maintenance positive 7
+step 4 rows 40 current mismatches [] maintenance positive 1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -B -c 'import numpy as np
+from model import *
+m=load(\"model_in.json\"); a=np.genfromtxt(\"evidence.csv\",delimiter=\",\",skip_header=1); X=a[:,:20]; y=a[:,20]
+for fs in [[0,1],[1,4],[0,1,5,6]]:
+ T=X.copy(); mask=T[:,9]==1
+ for f in fs: T[mask,f]=0
+ z=logit(m,T); print(fs,\"mismatch\",(np.flatnonzero((z>0)"'!=y)+1).tolist())
+for j in range(1,5):
+ a=np.genfromtxt("evidence_step%d.csv"%j,delimiter=",",skip_header=1)
+ print("step",j,"positive maintenance rows: users, current logit, old label")
+ for x,z in zip(a,logit(m,a[:,:20])):
+  if x[9]==1 and x[20]==1: print(round(x[2],4),round(z,4),int(x[20]))
+'"'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+[0, 1] mismatch [4, 5, 7]
+[1, 4] mismatch [1, 4, 5, 7]
+[0, 1, 5, 6] mismatch []
+step 1 positive maintenance rows: users, current logit, old label
+0.7703 67.6147 1
+0.9465 44.1989 1
+0.9205 12.6362 1
+0.3094 63.303 1
+0.34 25.0565 1
+0.34 25.0565 1
+step 2 positive maintenance rows: users, current logit, old label
+0.6847 52.6721 1
+0.2248 8.4711 1
+0.8331 96.3046 1
+0.42 0.4149 1
+0.07 18.9781 1
+step 3 positive maintenance rows: users, current logit, old label
+0.4476 3.7029 1
+0.0274 0.0565 1
+0.3588 0.1792 1
+0.1107 0.2977 1
+0.2032 24.956 1
+0.8936 87.4303 1
+0.06 0.15 1
+step 4 positive maintenance rows: users, current logit, old label
+0.5 15.9895 1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -B -c 'import numpy as np
+from model import *
+m=load(\"model_in.json\")
+X=[]
+for u in [0,.25,.48,.49,.499,.5,.501,.75]:
+ x=np.full(20,.5); x[[0,1,4,5,6,7,9]]=1; x[8]=0; x[2]=u; X.append(x)
+X=np.array(X); T=X.copy(); T[:,[0,1,5,6]]=0
+for x,z,t in zip(X,logit(m,X),logit(m,T)): print(\"users\",x[2],\"z\",round(z,4),\"reinterpreted\",round(t,4),\"shift\",round(z-80,4),\"interaction\",round(z-2400*max(0,.5-x[2]),4))
+'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+users 0.0 z 65.1039 reinterpreted -0.7 shift -14.8961 interaction -1134.8961
+users 0.25 z 78.053 reinterpreted -0.7 shift -1.947 interaction -521.947
+users 0.48 z 90.6779 reinterpreted -0.7 shift 10.6779 interaction 42.6779
+users 0.49 z 91.2636 reinterpreted -0.7 shift 11.2636 interaction 67.2636
+users 0.499 z 91.7908 reinterpreted -0.7 shift 11.7908 interaction 89.3908
+users 0.5 z 91.8494 reinterpreted -0.7 shift 11.8494 interaction 91.8494
+users 0.501 z 91.9079 reinterpreted -0.7 shift 11.9079 interaction 91.9079
+users 0.75 z 105.1309 reinterpreted -0.7 shift 25.1309 interaction 105.1309
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -B -c 'import numpy as np
+from model import *
+m=load(\"model_in.json\"); rng=np.random.default_rng(52); X=rng.random((4096,20)); X[:,[7,8]]=rng.integers(0,2,(4096,2)); X[:,9]=1; X[:,2]*=.5; T=X.copy(); T[:,[0,1,5,6]]=0; z=logit(m,T); print(\"reinterpret positives\",int(sum(z>0)),\"max\",float(z.max()))
+a=np.genfromtxt(\"evidence.csv\",delimiter=\",\",skip_header=1); X=a[:,:20]; z=logit(m,X); mask=(X[:,9]==1)&(X[:,2]<.5)
+print(\"interaction mismatch\",(np.flatnonzero(((z-100*X[:,1]*mask)>0)"'!=a[:,20])+1).tolist())
+'"'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 16ms:
+reinterpret positives 0 max -0.7
+interaction mismatch []
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+Three rule types match all 32 current examples: a region override, a fixed logit penalty, and an urgency-dependent penalty. I will use queries that separate these rules and test the proposed boundary at users_affected = 0.5.
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -B -c 'import numpy as np
+from model import *
+m=load(\"model_in.json\"); X=[]
+for u in [.25,.49]:
+ for v in [0,.2,.5,.8,1]:
+  x=np.full(20,.5); x[[0,4,5,6,7,9]]=1; x[8]=0; x[2]=u; x[1]=v; X.append(x)
+X=np.array(X)
+for x,z in zip(X,logit(m,X)): print(\"users\",x[2],\"urgency\",x[1],\"logit\",round(z,5),\"predictions\",[0,int(z>80),int(z>100*x[1])])
+'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+users 0.25 urgency 0.0 logit 30.24828 predictions [0, 0, 1]
+users 0.25 urgency 0.2 logit 41.34714 predictions [0, 0, 1]
+users 0.25 urgency 0.5 logit 55.94099 predictions [0, 0, 1]
+users 0.25 urgency 0.8 logit 69.64613 predictions [0, 0, 0]
+users 0.25 urgency 1.0 logit 78.05296 predictions [0, 0, 0]
+users 0.49 urgency 0.0 logit 48.57904 predictions [0, 0, 1]
+users 0.49 urgency 0.2 logit 58.00932 predictions [0, 0, 1]
+users 0.49 urgency 0.5 logit 71.1427 predictions [0, 0, 1]
+users 0.49 urgency 0.8 logit 83.10763 predictions [0, 1, 1]
+users 0.49 urgency 1.0 logit 91.26362 predictions [0, 1, 0]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "<lab>/.venv/bin/python -B -c 'import csv, hashlib
+from pathlib import Path
+import numpy as np
+from model import FEATURES,load,logit
+p=Path(\"model_in.json\"); before=hashlib.sha256(p.read_bytes()).hexdigest(); m=load(str(p))
+a=np.genfromtxt(\"evidence.csv\",delimiter=\",\",skip_header=1)
+def predict(X):
+ z=logit(m,X); gate=(X[:,9]==1)&(X[:,2]<.5)
+ return np.column_stack([np.where(gate,False,z>0),z-80*gate>0,z-100*X[:,1]*gate>0]).astype(int)
+assert np.all(predict(a[:,:20])==a[:,20,None])
+specs=[(.49,1,1),(.25,0,1),(.49,.8,1),(.499,1,1),(.5,1,1),(.501,1,1),(.49,1,0),(.25,1,1)]
+rows=[]
+for users,urgency,maintenance in specs:
+ x=np.full(20,.5); x[[0,4,5,6,7]]=1; x[8]=0; x[2]=users; x[1]=urgency; x[9]=maintenance; rows.append(x)
+X=np.array(rows); pred=predict(X); z=logit(m,X)
+assert X.shape==(8,20) and np.all((X>=0)&(X<=1)) and np.isin(X[:,[7,8,9]],[0,1]).all()
+with open(\"query.csv\",\"w\",newline=\"\") as f:
+ w=csv.writer(f); w.writerow(FEATURES); w.writerows(X.tolist())
+text=\"\"\"# Candidate rules for step 5
+
+Let L(x) be the unchanged model_in.json logit. Let M be maintenance_window,
+U be users_affected, and Q be urgency. Define region R by M = 1 and U < 0.5.
+Escalate means the proposed logit is strictly greater than zero.
+
+1. **A: Region override.** Suppress every alert in R. Use L(x) outside R.
+   A representative logit inside R is min(L(x), 0).
+2. **B: Output shift.** Subtract 80 from L(x) inside R. Use L(x) outside R.
+   A sufficiently large original logit can still trigger escalation.
+3. **C: Interaction.** Subtract 100 times Q from L(x) inside R. Use L(x)
+   outside R. Maintenance changes the effect of urgency when U is below 0.5.
+   The extra penalty is zero at Q = 0 and increases with Q.
+
+These are hypotheses, not confirmed rules. The constants are explicit candidate
+values, not identified parameters. Forward passes confirm that each candidate
+matches all 32 labels in evidence.csv. Rows 1-16 change from escalate to suppress;
+rows 17-32 keep their current labels. Every changed row is in R.
+
+The historical files contain labels from earlier steps. Later corrections can
+override them, as TASK.md states. These candidates use the current model as the
+baseline and preserve its exact logit outside R. They do not assume that all
+historical labels remain valid after step 5.
+
+## Query predictions
+
+The first two queries separate all three rule types. Query 3 supplies another
+separation. Queries 4-6 test the proposed strict boundary at U = 0.5. Query 7
+tests the maintenance condition. Query 8 tests agreement below that boundary.
+The predictions below are hypotheses; they are not oracle answers.
+
+| CSV row | U | Q | M | Current logit | A | B | C |
+|---|---|---|---|---|---|---|---|
+\"\"\"
+for i,((u,q,maint),score,pr) in enumerate(zip(specs,z,pred),1):
+ text+=f\"| {i} | {u} | {q} | {maint} | {score:.6f} | {pr[0]} | {pr[1]} | {pr[2]} |\\n\"
+Path(\"CANDIDATES.md\").write_text(text)
+with open(\"query.csv\",newline=\"\") as f: saved=list(csv.reader(f))
+assert saved[0]==FEATURES and len(saved)==9 and all(len(r)==20 for r in saved)
+assert before==hashlib.sha256(p.read_bytes()).hexdigest()
+assert not Path(\"model_out.json\").exists()
+print(\"Verified: three candidates match 32/32 current labels; query.csv has eight valid rows; model_in.json is unchanged; model_out.json does not exist.\")
+print(pred.tolist())
+'" in $WSROOT/large/s0/astra-query8w-r2/step5
+ succeeded in 0ms:
+Verified: three candidates match 32/32 current labels; query.csv has eight valid rows; model_in.json is unchanged; model_out.json does not exist.
+[[0, 1, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0], [1, 1, 1], [1, 1, 1], [1, 1, 1], [0, 0, 0]]
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+Created CANDIDATES.md with three rule types, each matching all 32 current examples. Created query.csv with eight valid queries.
+
+The model is unchanged. No model_out.json was written.
+hook: Stop
+hook: Stop Completed
+tokens used
+30'923
+Created CANDIDATES.md with three rule types, each matching all 32 current examples. Created query.csv with eight valid queries.
+
+The model is unchanged. No model_out.json was written.

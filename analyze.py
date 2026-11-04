@@ -13,6 +13,9 @@ from harness import LEAK_RE
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
 OK = 0.95
+# ROUND=1: round-1 runs; ROUND=2: sandboxed rerun. Only non-text arms were rerun (tag -r2);
+# text arms keep their round-1 reps in both. Unset: every chain under runs/.
+ROUND = os.environ.get("ROUND")
 
 
 def tokens(log):
@@ -34,6 +37,8 @@ def chains(task):
         leaks = sorted({m.group(0) for p in glob.glob(f"{d}/step*/codex*.log")
                         for m in re.finditer(LEAK_RE, open(p, errors="replace").read())})  # all phases
         mode = rows[0].get("mode", "text")
+        if ROUND and mode != "text" and rows[0]["rep"] != {"1": 0, "2": 2}[ROUND]:
+            continue
         out.append({"llm": rows[0]["llm"] + ("" if mode == "text" else f"-{mode}"), "seed": rows[0]["seed"], "rep": rows[0]["rep"],
                     "final": rows[-1], "steps_ok": [step_ok(r) for r in rows],
                     "success": all(step_ok(r) for r in rows), "tokens": tok, "leaks": leaks,
@@ -92,6 +97,8 @@ if __name__ == "__main__":
     os.makedirs(f"{ROOT}/results", exist_ok=True)
     allres = {t: summarize(t) for t in TASKS if glob.glob(f"{ROOT}/runs/{t}/seed*")}
     json.dump(allres, open(f"{ROOT}/results/summary.json", "w"), indent=1)
+    if ROUND:
+        json.dump(allres, open(f"{ROOT}/results/summary_round{ROUND}.json", "w"), indent=1)
     for t, r in allres.items():
         print(f"== {t}")
         for llm, s in r["llm"].items():

@@ -8,6 +8,8 @@ import os
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# ROUND=1: round-1 chains (tag -r0); ROUND=2: sandboxed rerun (tag -r2). Unset: all chains.
+ROUND = os.environ.get("ROUND")
 KEYS = ("acc_all", "fix_all", "fix_latest", "retain_earlier", "drift_other", "acc_other")
 
 
@@ -27,16 +29,27 @@ def fix_all(pred):
     return float((pred[_ALL] == _T["y"][_ALL]).mean())
 
 
+def chain_leaks(f, rows):
+    """Rerun chains (rep > 0, full tool transcripts): rescan logs with the current check.
+    Round-1 chains keep the leaks recorded at run time."""
+    if rows[0].get("rep", 0) == 0:
+        return sorted({w for r in rows for w in r["leaks"]})
+    logs = [os.path.join(os.path.dirname(f), f"step{r['step']}", "editor.log") for r in rows]
+    return sorted({w for p in logs if os.path.exists(p) for w in H.leaks_in(open(p, errors="replace").read())})
+
+
 out = {"arms": {}, "per_chain": [], "baselines": {}}
 for f in sorted(glob.glob(f"{HERE}/runs/seed*/*-r*/results.json")):
     rows = json.load(open(f))
     last = rows[-1]
+    if ROUND and last.get("rep") != {"1": 0, "2": 2}[ROUND]:
+        continue
     arm = f"{last['llm']}-{last['mode']}"
     last = dict(last, fix_all=fix_all(np.load(os.path.join(os.path.dirname(f), f"step{last['step']}", "test_pred.npy"))))
     out["per_chain"].append({"arm": arm, "seed": last["seed"], "effort": rows[0].get("effort", "high" if last["llm"] in ("astra", "sol") else "medium"),
                              **{k: last.get(k) for k in KEYS},
                              "minutes": round(sum(r["seconds"] for r in rows) / 60, 1),
-                             "leaks": sorted({w for r in rows for w in r["leaks"]})})
+                             "leaks": chain_leaks(f, rows)})
 for c in out["per_chain"]:
     out["arms"].setdefault(c["arm"], []).append(c)
 summary = {arm: {**{k: mean([c[k] for c in cs]) for k in KEYS}, "n": len(cs),
@@ -64,6 +77,8 @@ if bl:
 
 os.makedirs(f"{HERE}/results", exist_ok=True)
 json.dump(out, open(f"{HERE}/results/summary.json", "w"), indent=1)
+if ROUND:
+    json.dump(out, open(f"{HERE}/results/summary_round{ROUND}.json", "w"), indent=1)
 print("unedited base: acc_all 0.7029 (laya_lab.py base)")
 for arm, s in sorted(summary.items()):
     print(f"{arm:16s} n={s['n']} acc {s['acc_all']} range {s['acc_range']} | fix_all {s['fix_all']} | fix3 {s['fix_latest']} retain {s['retain_earlier']}"

@@ -18,6 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import lab
+import sandbox
 from tasks import TASKS
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
@@ -192,8 +193,10 @@ def call_codex(llm, ws, prompt, logname, q=None, T=None):
                 shutil.copy(os.path.join(ws, "model_in.json"), os.path.join(ws, "model_out.json"))
             return "ok"
         try:
-            subprocess.run(["codex", "exec", "-m", LLMS[llm], "-c", "model_reasoning_effort=high",
-                            "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", ws, prompt],
+            # Codex's own sandbox cannot nest inside sandbox-exec; the wrapper is the boundary.
+            subprocess.run(sandbox.wrap(["codex", "exec", "-m", LLMS[llm], "-c", "model_reasoning_effort=high",
+                            "--sandbox", "danger-full-access", "--skip-git-repo-check", "-C", ws, prompt],
+                                        writable=[ws]),
                            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=3600)
             return "ok"
         except subprocess.TimeoutExpired:
@@ -241,6 +244,10 @@ def run_step(T, seed, llm, rep, k, model_in, mode="text"):
         k=k, K=K, nin=len(T.features), order=", ".join(T.features), doc=T.feature_doc, py=PY,
         history=history, correction=corr_text(T, k, mode), n=len(ev)))
     if mode != "text":
+        with open(os.path.join(ws, "TASK.md"), "a") as f:
+            f.write("\n`evidence_step<j>.csv` holds the examples (and answered queries) of earlier step j, "
+                    "labelled as they were at step j. A later correction may override some of those labels.\n")
+    if mode != "text":
         # Earlier steps' evidence stays available so earlier inferred rules can be checked.
         for j in range(1, k):
             ej = np.load(os.path.join(sdir(T, seed), f"evidence_{j}.npy"))
@@ -250,8 +257,9 @@ def run_step(T, seed, llm, rep, k, model_in, mode="text"):
                 ans = os.path.join(sdir(T, seed), tag(llm, rep, mode), f"step{j}", "answers.npy")
                 if os.path.exists(ans):
                     rows_j += list(np.load(ans))
+                # Original labels from step j (not relabelled with step k): no extra supervision.
                 for x in rows_j:
-                    f.write(",".join(f"{v:.17g}" for v in x) + f",{int(T.target(np.asarray(x)[None, :], k)[0])}\n")
+                    f.write(",".join(f"{v:.17g}" for v in x) + f",{int(T.target(np.asarray(x)[None, :], j)[0])}\n")
     t0 = time.time()
     status = "ok"
     if mode.startswith("query"):
@@ -420,13 +428,26 @@ if __name__ == "__main__":
         for k in range(1, len(T.corrections) + 1):
             d = np.genfromtxt(os.path.join(ws0, f"step{k}", "evidence.csv"), delimiter=",", skip_header=1)
             assert np.array_equal(T.target(d[:, :-1], k), d[:, -1].astype(int)), f"label drift in step {k} evidence"
+        # Examples-only arms: re-supplied earlier evidence keeps its original step's labels.
+        if T.name == "large":
+            chain(T, s, "noop", 0, "hidden")
+            wsh = os.path.join(os.environ["WSROOT"], T.name, f"s{s}", "noop-hidden-r0", "step4")
+            for j in (1, 2, 3):
+                d = np.genfromtxt(os.path.join(wsh, f"evidence_step{j}.csv"), delimiter=",", skip_header=1)
+                assert np.array_equal(T.target(d[:, :-1], j), d[:, -1].astype(int)), f"relabelled step {j}"
+            shutil.rmtree(os.path.join(sdir(T, s), "noop-hidden-r0"))
+        # Editors run sandboxed: ground truth and earlier runs are unreadable.
+        bad = subprocess.run(sandbox.wrap([PY, "-c", f"open({os.path.join(ROOT, 'tasks.py')!r}).read(1)"]),
+                             capture_output=True)
+        assert bad.returncode != 0 and b"not permitted" in bad.stderr
         print("SMOKE OK", T.name, flush=True)
     elif cmd == "edits":
         seeds = [int(s) for s in sys.argv[3].split(",")]
         reps, llms = int(sys.argv[4]), sys.argv[5].split(",")
         workers = int(sys.argv[6]) if len(sys.argv) > 6 else 6
         mode = sys.argv[7] if len(sys.argv) > 7 else "text"
-        jobs = [(s, m, r) for r in range(reps) for s in seeds for m in llms]
+        rep0 = int(os.environ.get("REP0", "0"))  # reruns use a new rep index, never the old cache
+        jobs = [(s, m, r) for r in range(rep0, rep0 + reps) for s in seeds for m in llms]
         with ThreadPoolExecutor(workers) as ex:
             futs = [ex.submit(chain, T, s, m, r, mode) for s, m, r in jobs]
             for f in futs:

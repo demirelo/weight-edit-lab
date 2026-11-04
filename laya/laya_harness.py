@@ -19,6 +19,9 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import laya_lab as L
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sandbox  # noqa: E402  (lab root: enforced read boundary for editors)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY = os.path.join(HERE, "..", ".venv", "bin", "python")
 PY = os.path.abspath(PY)
@@ -28,7 +31,27 @@ LLMS = {"astra": ("codex", "gpt-6-astra", "high"), "sol": ("codex", "gpt-6.1-sol
         "opus": ("claude", "claude-opus-5-5", "medium"), "opus-high": ("claude", "claude-opus-5-5", "high"),
         "fable-high": ("claude", "claude-fable-5-1", "high")}
 CORR = json.load(open(os.path.join(HERE, "corrections.json"))) if os.path.exists(os.path.join(HERE, "corrections.json")) else []
-LEAK_RE = r"weight-edit-hidden|weight-edit-lab/laya/(laya_harness|corrections)|test\.npz|cache/train\.npz|weight-edit-lab/laya/runs"
+LEAK_RE = r"weight-edit-hidden|weight-edit-lab/laya/(laya_harness|corrections)|(?<!\w)test\.npz|cache/train\.npz|weight-edit-lab/laya/runs"
+
+
+def leaks_in(logtxt):
+    """Leak-pattern hits in what the editor asked to run or open.
+
+    Claude stream-json logs: scan tool_use inputs only. Tool results also hold the text of
+    files the editor may read (laya_lab.py names the hidden folder), which is not an attempt.
+    Other logs (Codex): scan everything.
+    """
+    calls = []
+    for line in logtxt.splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        content = m.get("message", {}).get("content") if isinstance(m, dict) and isinstance(m.get("message"), dict) else None
+        if m.get("type") == "assistant" and isinstance(content, list):
+            calls += [json.dumps(c.get("input")) for c in content if isinstance(c, dict) and c.get("type") == "tool_use"]
+    text = "\n".join(calls) if calls or logtxt.lstrip().startswith("{") else logtxt
+    return sorted({m.group(0) for m in re.finditer(LEAK_RE, text)})
 
 
 def data(split):
@@ -184,6 +207,7 @@ current answer, correct department).
 Edit `router.py` so the final answers follow the new correction for all such
 messages, keep earlier corrections, and otherwise keep Laya's answer. Plain Python
 only (re, string ops); no ML libraries, no training. A hidden test set scores it.
+To test your patch, use this Python: `{py}`.
 Write `NOTES.md` (under 200 words).
 """
 
@@ -200,16 +224,18 @@ def call_editor(llm, ws, prompt, logname):
                 shutil.copy(os.path.join(ws, "scorer_in.npz"), os.path.join(ws, "scorer_out.npz"))
             return "ok"
         if tool == "codex":
-            cmd = ["codex", "exec", "-m", model, "-c", f"model_reasoning_effort={effort}", "--sandbox", "workspace-write",
+            # Codex's own sandbox cannot nest inside sandbox-exec; the wrapper is the boundary.
+            cmd = ["codex", "exec", "-m", model, "-c", f"model_reasoning_effort={effort}", "--sandbox", "danger-full-access",
                    "--skip-git-repo-check", "-C", ws, prompt]
         else:
             # Opus: file tools plus this venv's python and read-only shell tools; nothing else.
             # stream-json + verbose keeps the full tool transcript, so reads can be audited.
             cmd = ["claude", "-p", prompt, "--model", model, "--output-format", "stream-json", "--verbose"] + (["--effort", effort] if effort and llm != "opus" else []) + ["--permission-mode", "acceptEdits",
                    "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", f"Bash({PY}:*)",
-                   "Bash(ls:*)", "Bash(head:*)", "Bash(cat:*)", "Bash(wc:*)"]
+                   "Bash(python3:*)", "Bash(python:*)", "Bash(ls:*)", "Bash(head:*)", "Bash(cat:*)", "Bash(wc:*)"]
         try:
-            subprocess.run(cmd, cwd=ws, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=3600)
+            subprocess.run(sandbox.wrap(cmd, writable=[ws] if tool == "codex" else None), cwd=ws,
+                           stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=3600)
             return "ok"
         except subprocess.TimeoutExpired:
             return "timeout"
@@ -257,7 +283,7 @@ def run_step(seed, llm, rep, k, model_in, mode):
     shutil.copytree(ws, keep, ignore=shutil.ignore_patterns("*.profraw", "out*.npz"))
     logtxt = open(os.path.join(keep, "editor.log"), errors="replace").read()
     info = {"status": status, "seconds": round(secs), "effort": LLMS.get(llm, (None, None, None))[2] or "cli-default",
-            "leaks": sorted({m.group(0) for m in re.finditer(LEAK_RE, logtxt)})}
+            "leaks": leaks_in(logtxt)}
     json.dump(info, open(os.path.join(keep, "done.json"), "w"))
     return info
 
@@ -330,7 +356,20 @@ if __name__ == "__main__":
         assert "INTENT_DEPT" not in open(os.path.join(HERE, "departments.py")).read()
         hit = lambda t: bool(re.search(LEAK_RE, t))
         assert hit("cat ~/.weight-edit-hidden/laya/departments_truth.py") and hit("np.load('cache/test.npz')")
-        assert not hit("evidence.csv") and not hit("scorer_in.npz")
+        assert not hit("evidence.csv") and not hit("scorer_in.npz") and not hit("neg_test.npz")
+        use = lambda inp: json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "input": inp}]}})
+        res = json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": "HIDDEN = '~/.weight-edit-hidden/laya'"}]}})
+        assert leaks_in(use({"command": "cat ~/.weight-edit-hidden/laya/test.npz"})) == ["test.npz", "weight-edit-hidden"]
+        assert leaks_in(use({"file_path": "laya_lab.py"}) + "\n" + res) == []
+        assert leaks_in("codex log: open ~/.weight-edit-hidden/x") == ["weight-edit-hidden"]
+        # Enforced boundary: inside the editor sandbox, embedding works and hidden data is unreadable.
+        d = tempfile.mkdtemp()
+        open(os.path.join(d, "embed.py"), "w").write(EMBED_PY.format(laya=HERE))
+        ok = subprocess.run(sandbox.wrap([PY, "embed.py", "o.npz", "my pin is blocked"]), cwd=d, capture_output=True)
+        assert ok.returncode == 0 and os.path.exists(os.path.join(d, "o.npz")), ok.stderr[-300:]
+        for f in (os.path.join(L.HIDDEN, "test.npz"), os.path.join(HERE, "corrections.json")):
+            bad = subprocess.run(sandbox.wrap([PY, "-c", f"open({f!r}, 'rb').read(1)"]), capture_output=True)
+            assert bad.returncode != 0 and b"not permitted" in bad.stderr, f
         print("SMOKE OK", flush=True)
     elif cmd == "edits":
         seeds = [int(s) for s in sys.argv[2].split(",")]
@@ -338,8 +377,9 @@ if __name__ == "__main__":
         workers = int(sys.argv[4]) if len(sys.argv) > 4 else 6
         mode = sys.argv[5] if len(sys.argv) > 5 else "text"
         jobs = [(s, m) for s in seeds for m in llms]
+        rep = int(os.environ.get("REP0", "0"))  # reruns use a new rep index
         with ThreadPoolExecutor(workers) as ex:
-            for f in [ex.submit(chain, s, m, 0, mode) for s, m in jobs]:
+            for f in [ex.submit(chain, s, m, rep, mode) for s, m in jobs]:
                 try:
                     f.result()
                 except Exception as e:
